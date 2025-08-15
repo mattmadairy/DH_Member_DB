@@ -169,24 +169,9 @@ class MemberApp:
         deleted_members = database.get_deleted_members()
         for m in deleted_members:
             data = (
-                m[0],   # ID
-                m[1],   # Badge Number
-                m[2],   # Membership Type
-                m[3],   # First Name
-                m[4],   # Last Name
-                m[5],   # DOB
-                m[6],   # Email 1
-                m[13],  # Email 2
-                m[7],   # Phone
-                m[8],   # Address
-                m[9],   # City
-                m[10],  # State
-                m[11],  # Zip
-                m[12],  # Join Date
-                m[14],  # Sponsor
-                m[15],  # Card/Fob Internal
-                m[16],  # Card/Fob External
-                m[17],  # Deleted At
+                m[0], m[1], m[2], m[3], m[4], m[5],
+                m[6], m[13], m[7], m[8], m[9], m[10], m[11],
+                m[12], m[14], m[15], m[16], m[17],
             )
             tree.insert("", "end", values=data)
 
@@ -240,10 +225,28 @@ class MemberApp:
         if member_id:
             member = database.get_member_by_id(member_id)
             if member:
+                mapping = {
+                    "Badge Number": member[1],
+                    "Membership Type": member[2],
+                    "First Name": member[3],
+                    "Last Name": member[4],
+                    "Date of Birth (MM/DD/YYYY)": member[5],
+                    "Email Address": member[6],
+                    "Email Address 2": member[13],
+                    "Phone Number": member[7],
+                    "Address": member[8],
+                    "City": member[9],
+                    "State": member[10],
+                    "Zip Code": member[11],
+                    "Join Date (MM/DD/YYYY)": member[12],
+                    "Sponsor": member[14],
+                    "Card/Fob Internal Number": member[15],
+                    "Card/Fob External Number": member[16],
+                }
                 for key, widget in inputs.items():
-                    val = member[labels.index(key) + 1]
+                    val = mapping.get(key, "")
                     if key == "Membership Type":
-                        widget.set(val.capitalize())
+                        widget.set(val.capitalize() if val else "")
                     else:
                         widget.delete(0, tk.END)
                         if val is not None:
@@ -251,14 +254,8 @@ class MemberApp:
 
         btns = ttk.Frame(win)
         btns.grid(row=len(labels), columnspan=2, pady=10)
-        ttk.Button(
-            btns,
-            text="Save",
-            command=lambda: self._save_form(win, inputs, member_id),
-        ).pack(side="left", padx=4)
+        ttk.Button(btns, text="Save", command=lambda: self._save_form(win, inputs, member_id)).pack(side="left", padx=4)
         ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="left", padx=4)
-
-        # Bind Enter key to save
         win.bind('<Return>', lambda event: self._save_form(win, inputs, member_id))
 
     def _save_form(self, win, inputs, member_id=None):
@@ -271,13 +268,46 @@ class MemberApp:
         self._refresh_members()
 
     def _export_data(self):
-        try:
-            filepath = database.export_members_to_csv()
-            messagebox.showinfo("Export Successful", f"Data exported to:\n{filepath}")
-            subprocess.Popen(f'explorer /select,"{filepath}"')
-        except Exception as e:
-            messagebox.showerror("Export Failed", str(e))
+        export_win = tk.Toplevel(self.root)
+        export_win.title("Export Members")
+        export_win.geometry("300x300")
 
+        selected_types = {mtype: tk.BooleanVar(value=(mtype == "All")) for mtype in self.member_types}
+
+        def on_check_change(changed_type):
+            if changed_type == "All":
+                if selected_types["All"].get():
+                    for m in self.member_types:
+                        if m != "All":
+                            selected_types[m].set(False)
+            else:
+                if selected_types[changed_type].get():
+                    selected_types["All"].set(False)
+                else:
+                    if not any(selected_types[m].get() for m in self.member_types if m != "All"):
+                        selected_types["All"].set(True)
+
+        for mtype in self.member_types:
+            cb = ttk.Checkbutton(
+                export_win,
+                text=mtype,
+                variable=selected_types[mtype],
+                command=lambda m=mtype: on_check_change(m)
+            )
+            cb.pack(anchor="w", pady=2)
+
+        def export_selected():
+            chosen_types = [m for m, var in selected_types.items() if var.get()]
+            try:
+                filepath = database.export_members_to_csv(chosen_types)
+                messagebox.showinfo("Export Successful", f"Data exported to:\n{filepath}")
+                subprocess.Popen(f'explorer /select,"{filepath}"')
+                export_win.destroy()
+            except Exception as e:
+                messagebox.showerror("Export Failed", str(e))
+
+        ttk.Button(export_win, text="Export", command=export_selected).pack(pady=10)
+        ttk.Button(export_win, text="Cancel", command=export_win.destroy).pack()
 
 if __name__ == "__main__":
     root = tk.Tk()

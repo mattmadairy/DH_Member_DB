@@ -1,155 +1,113 @@
 import sqlite3
-import os
 import csv
+import os
 from datetime import datetime
 
 DB_FILE = "members.db"
 
-
-def create_table():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            badge_number TEXT,
-            membership_type TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            date_of_birth TEXT,
-            email_address TEXT,
-            phone_number TEXT,
-            address TEXT,
-            city TEXT,
-            state TEXT,
-            zip_code TEXT,
-            join_date TEXT,
-            email_address_2 TEXT,
-            sponsor TEXT,
-            card_fob_internal TEXT,
-            card_fob_external TEXT,
-            deleted_at TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def add_member(badge_number, membership_type, first_name, last_name, date_of_birth,
-               email_address, email_address_2, phone_number, address, city, state,
-               zip_code, join_date, sponsor, card_fob_internal, card_fob_external):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO members (
-            badge_number, membership_type, first_name, last_name, date_of_birth,
-            email_address, email_address_2, phone_number, address, city, state,
-            zip_code, join_date, sponsor, card_fob_internal, card_fob_external
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (badge_number, membership_type, first_name, last_name, date_of_birth,
-          email_address, email_address_2, phone_number, address, city, state,
-          zip_code, join_date, sponsor, card_fob_internal, card_fob_external))
-    conn.commit()
-    conn.close()
-
-
 def get_all_members():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM members WHERE deleted_at IS NULL")
+    cursor.execute("SELECT * FROM members WHERE deleted_at IS NULL ORDER BY badge_number ASC")
     members = cursor.fetchall()
     conn.close()
     return members
 
+def get_deleted_members():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM members WHERE deleted_at IS NOT NULL ORDER BY badge_number ASC")
+    members = cursor.fetchall()
+    conn.close()
+    return members
 
 def get_member_by_id(member_id):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM members WHERE id=?", (member_id,))
+    cursor.execute("SELECT * FROM members WHERE id = ?", (member_id,))
     member = cursor.fetchone()
     conn.close()
     return member
 
-
-def update_member(member_id, badge_number, membership_type, first_name, last_name, date_of_birth,
-                  email_address, email_address_2, phone_number, address, city, state,
-                  zip_code, join_date, sponsor, card_fob_internal, card_fob_external):
+def add_member(*args):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("""
-        UPDATE members
-        SET badge_number=?, membership_type=?, first_name=?, last_name=?, date_of_birth=?,
-            email_address=?, email_address_2=?, phone_number=?, address=?, city=?, state=?,
-            zip_code=?, join_date=?, sponsor=?, card_fob_internal=?, card_fob_external=?
-        WHERE id=?
-    """, (badge_number, membership_type, first_name, last_name, date_of_birth,
-          email_address, email_address_2, phone_number, address, city, state,
-          zip_code, join_date, sponsor, card_fob_internal, card_fob_external, member_id))
+        INSERT INTO members (
+            badge_number, membership_type, first_name, last_name, dob, email, phone, address,
+            city, state, zip_code, join_date, email2, sponsor, card_internal, card_external
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, args)
     conn.commit()
     conn.close()
 
+def update_member(member_id, *args):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE members SET
+            badge_number=?, membership_type=?, first_name=?, last_name=?, dob=?, email=?, phone=?, address=?,
+            city=?, state=?, zip_code=?, join_date=?, email2=?, sponsor=?, card_internal=?, card_external=?
+        WHERE id=?
+    """, (*args, member_id))
+    conn.commit()
+    conn.close()
 
 def soft_delete_member_by_badge(badge_number):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE members
-        SET deleted_at=datetime('now')
-        WHERE badge_number=?
-    """, (badge_number,))
+        SET deleted_at = ?
+        WHERE badge_number = ? AND deleted_at IS NULL
+    """, (datetime.now().isoformat(), badge_number))
     conn.commit()
     conn.close()
-
-
-def get_deleted_members():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM members WHERE deleted_at IS NOT NULL")
-    members = cursor.fetchall()
-    conn.close()
-    return members
-
 
 def restore_member_by_badge(badge_number):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE members
-        SET deleted_at=NULL
-        WHERE badge_number=?
+        SET deleted_at = NULL
+        WHERE badge_number = ?
     """, (badge_number,))
     conn.commit()
     conn.close()
 
-
-def export_members_to_csv():
-    # Get Downloads folder path
-    downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
-
-    # Create filename with date and time
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"DHRGC_members_export_{timestamp}.csv"
-    filepath = os.path.join(downloads_path, filename)
-
-    # Connect to the database and fetch all members
+def export_members_to_csv(member_types):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM members WHERE deleted_at IS NULL")
-    rows = cursor.fetchall()
 
-    # Get column names
-    col_names = [description[0] for description in cursor.description]
+    # Filtering logic
+    if "All" in member_types:
+        cursor.execute("SELECT * FROM members WHERE deleted_at IS NULL ORDER BY badge_number ASC")
+    else:
+        placeholders = ",".join("?" for _ in member_types)
+        cursor.execute(
+            f"SELECT * FROM members WHERE deleted_at IS NULL AND LOWER(membership_type) IN ({placeholders}) ORDER BY badge_number ASC",
+            [m.lower() for m in member_types]
+        )
 
-    # Write CSV
-    with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(col_names)
-        writer.writerows(rows)
-
+    members = cursor.fetchall()
     conn.close()
-    return filepath
 
+    # Prepare CSV path
+    export_folder = "exports"
+    os.makedirs(export_folder, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = os.path.join(export_folder, f"members_export_{timestamp}.csv")
 
-# Ensure table exists on first run
-create_table()
+    # Write to CSV
+    with open(filepath, mode="w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        headers = [
+            "ID", "Badge Number", "Membership Type", "First Name", "Last Name",
+            "Date of Birth", "Email Address", "Phone Number", "Address", "City",
+            "State", "Zip Code", "Join Date", "Email Address 2", "Sponsor",
+            "Card/Fob Internal Number", "Card/Fob External Number", "Deleted At"
+        ]
+        writer.writerow(headers)
+        writer.writerows(members)
+
+    return os.path.abspath(filepath)
