@@ -1,45 +1,19 @@
 import sqlite3
 
-DB_FILE = "members.db"
+db_path = "members.db"  # update path if needed
 
-# Columns your current code expects
-expected_columns = [
-    ("badge_number", "TEXT"),
-    ("first_name", "TEXT"),
-    ("last_name", "TEXT"),
-    ("address", "TEXT"),
-    ("city", "TEXT"),
-    ("state", "TEXT"),
-    ("zip_code", "TEXT"),
-    ("phone_number", "TEXT"),
-    ("email_address", "TEXT"),
-    ("dob", "TEXT"),
-    ("membership_type", "TEXT"),
-    ("start_date", "TEXT"),
-    ("end_date", "TEXT"),
-    ("notes", "TEXT"),
-    ("sponsor", "TEXT"),
-    ("card_fob_internal", "TEXT"),
-    ("card_fob_external", "TEXT"),
-    ("created_at", "TEXT"),
-    ("updated_at", "TEXT"),
-    ("deleted_at", "TEXT")
-]
+conn = sqlite3.connect(db_path)
+c = conn.cursor()
 
-conn = sqlite3.connect(DB_FILE)
-cursor = conn.cursor()
-
-# Get current columns in the table
-cursor.execute("PRAGMA table_info(members)")
-existing_columns = [row[1] for row in cursor.fetchall()]
-
-# Add any missing columns
-for col_name, col_type in expected_columns:
-    if col_name not in existing_columns:
-        cursor.execute(f"ALTER TABLE members ADD COLUMN {col_name} {col_type}")
-        print(f"Added missing column: {col_name}")
+try:
+    # Add the column if it doesn’t already exist
+    c.execute("ALTER TABLE members ADD COLUMN deleted INTEGER DEFAULT 0")
+    print("✅ 'deleted' column added.")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e).lower():
+        print("ℹ️ 'deleted' column already exists, no changes made.")
+    else:
+        raise
 
 conn.commit()
 conn.close()
-
-print("Database schema updated successfully!")
