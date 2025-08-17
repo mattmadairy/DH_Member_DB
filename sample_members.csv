@@ -1,0 +1,6 @@
+Badge Number,Membership Type,First Name,Last Name,Date of Birth,Email Address,Phone Number,Address,City,State,Zip Code,Join Date,Email Address 2,Sponsor,Card/Fob Internal Number,Card/Fob External Number
+1001,Active,John,Doe,1980-05-12,john.doe@example.com,555-111-2222,123 Main St,Springfield,NY,12345,2021-01-15,,Mike Sponsor,INT-001,EXT-001
+1002,Associate,Jane,Smith,1990-07-22,jane.smith@example.com,555-333-4444,456 Oak Ave,Greenville,CA,67890,2022-06-01,alt.jane@example.com,,INT-002,EXT-002
+1003,Probationary,Robert,Brown,1975-03-30,robert.brown@example.com,555-555-6666,789 Pine Rd,Fairview,TX,75201,2023-02-20,,Sarah Sponsor,INT-003,EXT-003
+1004,Prospective,Emily,Johnson,1985-09-14,emily.j@example.com,555-777-8888,321 Birch Ln,Lakeside,FL,33101,2023-10-10,,,INT-004,EXT-004
+1005,Former,Michael,Williams,1969-12-05,michael.w@example.com,555-999-0000,654 Cedar St,Hilltown,OH,44101,2019-07-07,,Old Sponsor,INT-005,EXT-005

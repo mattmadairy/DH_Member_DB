@@ -6,6 +6,7 @@ import os
 import member_form
 import csv
 from datetime import datetime
+import openpyxl   # for Excel imports
 
 
 class MemberApp:
@@ -19,7 +20,7 @@ class MemberApp:
         # track recycle bin refresh function
         self.recycle_bin_refresh_fn = None  
 
-        # Load icons (you can replace with actual .png/.gif files)
+        # Load icons
         self.icons = {}
         try:
             self.icons["add"] = PhotoImage(file=os.path.join(self.base_dir, "icons", "add.png"))
@@ -27,9 +28,9 @@ class MemberApp:
             self.icons["delete"] = PhotoImage(file=os.path.join(self.base_dir, "icons", "delete.png"))
             self.icons["recycle"] = PhotoImage(file=os.path.join(self.base_dir, "icons", "recycle.png"))
             self.icons["export"] = PhotoImage(file=os.path.join(self.base_dir, "icons", "export.png"))
+            self.icons["import"] = PhotoImage(file=os.path.join(self.base_dir, "icons", "import.png"))
         except Exception:
-            # fallback blank images if icons not found
-            self.icons = {k: None for k in ["add", "edit", "delete", "recycle", "export"]}
+            self.icons = {k: None for k in ["add", "edit", "delete", "recycle", "export", "import"]}
 
         # Style
         style = ttk.Style(self.root)
@@ -101,7 +102,7 @@ class MemberApp:
         toolbar = tk.Frame(self.root)
         toolbar.pack(side="top", fill="x")
 
-        # Search bar + buttons in one line
+        # Search bar + buttons
         search_frame = tk.Frame(toolbar)
         search_frame.pack(fill="x", padx=5, pady=3)
 
@@ -111,8 +112,9 @@ class MemberApp:
         search_entry.pack(side="left", padx=5)
         search_entry.bind("<KeyRelease>", self._on_search)
 
-        # Buttons aligned right (reversed order with icons)
+        # Buttons aligned right
         ttk.Button(search_frame, text="Export ⬇️", command=self._show_export_dialog).pack(side="right", padx=2)
+        ttk.Button(search_frame, text="Import ⬆️", command=self._show_import_dialog).pack(side="right", padx=2)
         ttk.Button(search_frame, text="🗑️ Recycle Bin", command=self._show_recycle_bin).pack(side="right", padx=2)
         ttk.Button(search_frame, text="❌ Delete Selected", command=self.delete_selected).pack(side="right", padx=2)
         ttk.Button(search_frame, text="✏️ Edit Selected", command=self.edit_selected).pack(side="right", padx=2)
@@ -136,7 +138,6 @@ class MemberApp:
             tree = self._make_tree_with_scrollbars(frame, columns)
             tree.bind("<Double-1>", self._on_tree_double_click)
             self.trees[mtype] = tree
-
 
     def _sort_treeview(self, tree, col, reverse):
         items = [(tree.set(k, col), k) for k in tree.get_children("")]
@@ -162,23 +163,9 @@ class MemberApp:
         members = database.get_all_members()
         for m in members:
             data = tuple(str(x or "") for x in (
-                m[0],  # ID
-                m[1],  # Badge Number
-                m[2],  # Membership Type
-                m[3],  # First Name
-                m[4],  # Last Name
-                m[5],  # DOB
-                m[6],  # Email
-                m[13], # Email 2
-                m[7],  # Phone
-                m[8],  # Address
-                m[9],  # City
-                m[10], # State
-                m[11], # Zip
-                m[12], # Join Date
-                m[14], # Sponsor
-                m[15], # Card Internal
-                m[16], # Card External
+                m[0], m[1], m[2], m[3], m[4], m[5],
+                m[6], m[13], m[7], m[8], m[9], m[10],
+                m[11], m[12], m[14], m[15], m[16],
             ))
             self.all_members_data.append(data)
             self.trees["All"].insert("", "end", values=data)
@@ -200,6 +187,7 @@ class MemberApp:
                 if mtype == "All" or data[2] == mtype:
                     tree.insert("", "end", values=data)
 
+    # ---------------- EXPORT ---------------- #
     def _show_export_dialog(self):
         dialog = tk.Toplevel(self.root)
         dialog.title("Export Members")
@@ -246,6 +234,44 @@ class MemberApp:
 
         ttk.Button(dialog, text="Export", command=do_export).pack(pady=10)
 
+    # ---------------- IMPORT ---------------- #
+    def _show_import_dialog(self):
+        filepath = filedialog.askopenfilename(
+            title="Import Members",
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx")]
+        )
+        if not filepath:
+            return
+
+        imported_rows = []
+        try:
+            if filepath.endswith(".csv"):
+                with open(filepath, newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        imported_rows.append(row)
+            elif filepath.endswith(".xlsx"):
+                wb = openpyxl.load_workbook(filepath)
+                sheet = wb.active
+                headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+                for row in sheet.iter_rows(min_row=2, values_only=True):
+                    imported_rows.append(dict(zip(headers, row)))
+        except Exception as e:
+            messagebox.showerror("Import Failed", f"Error reading file: {e}")
+            return
+
+        count = 0
+        for row in imported_rows:
+            try:
+                database.insert_member_from_dict(row)
+                count += 1
+            except Exception as e:
+                print(f"Skipping row due to error: {e}")
+
+        messagebox.showinfo("Import Complete", f"Imported {count} members.")
+        self.load_data()
+
+    # ---------------- RECYCLE BIN ---------------- #
     def _show_recycle_bin(self):
         win = tk.Toplevel(self.root)
         win.title("Recycle Bin")
@@ -285,6 +311,7 @@ class MemberApp:
 
         win.protocol("WM_DELETE_WINDOW", on_close)
 
+    # ---------------- MEMBER OPS ---------------- #
     def add_member(self):
         form = member_form.MemberForm(self.root)
         self.root.wait_window(form.top)
