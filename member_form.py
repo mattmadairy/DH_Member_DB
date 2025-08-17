@@ -1,119 +1,142 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import database
-import sys
-
 
 class MemberForm:
-    def __init__(self, master, member_id=None):
-        self.master = master
-        self.member_id = member_id
-
-        self.top = tk.Toplevel(master)
+    def __init__(self, parent, member_id=None):
+        self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
-        self.top.geometry("600x700")
-        self.top.grab_set()
+        self.member_id = member_id
+        # ✅ Bind Enter/Return to save
+        self.top.bind("<Return>", lambda event: self.save_member())
 
-        # --- Fields dictionary ---
-        self.entries = {}
+        # Form variables
+        self.badge_number_var = tk.StringVar()
+        self.membership_type_var = tk.StringVar()
+        self.first_name_var = tk.StringVar()
+        self.last_name_var = tk.StringVar()
+        self.dob_var = tk.StringVar()
+        self.email_var = tk.StringVar()
+        self.phone_var = tk.StringVar()
+        self.address_var = tk.StringVar()
+        self.city_var = tk.StringVar()
+        self.state_var = tk.StringVar()
+        self.zip_var = tk.StringVar()
+        self.join_date_var = tk.StringVar()
+        self.email2_var = tk.StringVar()
+        self.sponsor_var = tk.StringVar()
+        self.card_internal_var = tk.StringVar()
+        self.card_external_var = tk.StringVar()
 
-        # --- Form layout ---
-        form_frame = tk.Frame(self.top)
-        form_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        labels = [
-            "Badge Number", "Membership Type", "First Name", "Last Name",
-            "Date of Birth", "Email Address", "Email Address 2", "Phone Number",
-            "Address", "City", "State", "Zip Code", "Join Date", "Sponsor",
-            "Card/Fob Internal Number", "Card/Fob External Number"
+        # Membership type options (expanded list)
+        self.membership_types = [
+            "Probationary",
+            "Associate",
+            "Active",
+            "Life",
+            "Prospective",
+            "Wait List",
+            "Former"
         ]
 
-        for i, label in enumerate(labels):
-            tk.Label(form_frame, text=label).grid(row=i, column=0, sticky="w", pady=3)
-
-            if label in ("Address",):  # multi-line fields
-                txt = tk.Text(form_frame, height=3, width=30)
-                txt.grid(row=i, column=1, pady=3, sticky="ew")
-                self.entries[label] = txt
-            else:
-                entry = ttk.Entry(form_frame, width=30)
-                entry.grid(row=i, column=1, pady=3, sticky="ew")
-                self.entries[label] = entry
-
-        # Buttons
-        btn_frame = tk.Frame(self.top)
-        btn_frame.pack(fill="x", pady=10)
-
-        self.save_button = ttk.Button(btn_frame, text="Save", command=self._save)
-        self.save_button.pack(side="right", padx=5)
-
-        self.cancel_button = ttk.Button(btn_frame, text="Cancel", command=self.top.destroy)
-        self.cancel_button.pack(side="right", padx=5)
-
-        # --- Keyboard bindings ---
-        self.top.bind("<Return>", lambda event: self._save())
-        self.top.bind("<Escape>", lambda event: self.top.destroy())
-
-        # Allow Ctrl+Enter newlines in Text widgets
-        def allow_newline(event):
-            event.widget.insert("insert", "\n")
-            return "break"
-
-        for widget in self.entries.values():
-            if isinstance(widget, tk.Text):
-                widget.bind("<Control-Return>", allow_newline)
-
-        # Load existing data if editing
-        if self.member_id:
-            self._load_data()
-
-    def _load_data(self):
-        member = database.get_member_by_id(self.member_id)
-        if not member:
-            messagebox.showerror("Error", "Member not found")
-            self.top.destroy()
-            return
-
+        # Labels + Entries
         fields = [
-            member[1], member[2], member[3], member[4], member[5],
-            member[6], member[13], member[7], member[8], member[9],
-            member[10], member[11], member[12], member[14], member[15],
-            member[16]
+            ("Badge Number", self.badge_number_var),
+            ("Membership Type", self.membership_type_var),
+            ("First Name", self.first_name_var),
+            ("Last Name", self.last_name_var),
+            ("Date of Birth", self.dob_var),
+            ("Email Address", self.email_var),
+            ("Phone Number", self.phone_var),
+            ("Address", self.address_var),
+            ("City", self.city_var),
+            ("State", self.state_var),
+            ("Zip Code", self.zip_var),
+            ("Join Date", self.join_date_var),
+            ("Email Address 2", self.email2_var),
+            ("Sponsor", self.sponsor_var),
+            ("Card/Fob Internal Number", self.card_internal_var),
+            ("Card/Fob External Number", self.card_external_var),
         ]
 
-        for key, val in zip(self.entries.keys(), fields):
-            widget = self.entries[key]
-            if isinstance(widget, tk.Text):
-                widget.delete("1.0", tk.END)
-                widget.insert("1.0", val if val else "")
-            else:
-                widget.delete(0, tk.END)
-                widget.insert(0, val if val else "")
+        for idx, (label, var) in enumerate(fields):
+            ttk.Label(self.top, text=label).grid(row=idx, column=0, sticky="e", padx=5, pady=2)
 
-    def _save(self):
-        values = []
-        for key, widget in self.entries.items():
-            if isinstance(widget, tk.Text):
-                val = widget.get("1.0", "end-1c").strip()
+            if label == "Membership Type":
+                # Dropdown for member type
+                cb = ttk.Combobox(self.top, textvariable=var, values=self.membership_types, state="readonly")
+                cb.grid(row=idx, column=1, sticky="w", padx=5, pady=2)
             else:
-                val = widget.get().strip()
-            values.append(val if val else None)  # <-- allow blank fields
+                ttk.Entry(self.top, textvariable=var).grid(row=idx, column=1, sticky="w", padx=5, pady=2)
 
+        # Save button
+        ttk.Button(self.top, text="Save", command=self.save_member).grid(row=len(fields), column=0, columnspan=2, pady=10)
+
+        # If editing, load data
+        if self.member_id:
+            self.load_member()
+
+    def load_member(self):
+        member = database.get_member_by_id(self.member_id)
+        if member:
+            self.badge_number_var.set(member[1])
+            self.membership_type_var.set(member[2] if member[2] in self.membership_types else "")
+            self.first_name_var.set(member[3])
+            self.last_name_var.set(member[4])
+            self.dob_var.set(member[5])
+            self.email_var.set(member[6])
+            self.phone_var.set(member[7])
+            self.address_var.set(member[8])
+            self.city_var.set(member[9])
+            self.state_var.set(member[10])
+            self.zip_var.set(member[11])
+            self.join_date_var.set(member[12])
+            self.email2_var.set(member[13])
+            self.sponsor_var.set(member[14])
+            self.card_internal_var.set(member[15])
+            self.card_external_var.set(member[16])
+
+    def save_member(self):
         try:
             if self.member_id:
-                database.update_member(self.member_id, *values)
+                database.update_member(
+                    self.member_id,
+                    self.badge_number_var.get(),
+                    self.membership_type_var.get(),
+                    self.first_name_var.get(),
+                    self.last_name_var.get(),
+                    self.dob_var.get(),
+                    self.email_var.get(),
+                    self.phone_var.get(),
+                    self.address_var.get(),
+                    self.city_var.get(),
+                    self.state_var.get(),
+                    self.zip_var.get(),
+                    self.join_date_var.get(),
+                    self.email2_var.get(),
+                    self.sponsor_var.get(),
+                    self.card_internal_var.get(),
+                    self.card_external_var.get()
+                )
             else:
-                database.add_member(*values)
-
-            messagebox.showinfo("Success", "Member saved successfully!")
+                database.add_member(
+                    self.badge_number_var.get(),
+                    self.membership_type_var.get(),
+                    self.first_name_var.get(),
+                    self.last_name_var.get(),
+                    self.dob_var.get(),
+                    self.email_var.get(),
+                    self.phone_var.get(),
+                    self.address_var.get(),
+                    self.city_var.get(),
+                    self.state_var.get(),
+                    self.zip_var.get(),
+                    self.join_date_var.get(),
+                    self.email2_var.get(),
+                    self.sponsor_var.get(),
+                    self.card_internal_var.get(),
+                    self.card_external_var.get()
+                )
             self.top.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save member: {e}")
-
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    root.withdraw()
-    member_id = sys.argv[1] if len(sys.argv) > 1 else None
-    MemberForm(root, member_id)
-    root.mainloop()
