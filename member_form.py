@@ -79,6 +79,11 @@ class MemberForm:
     def load_member(self):
         member = database.get_member_by_id(self.member_id)
         if member:
+            # member tuple order matches your DB schema:
+            # id, badge_number, membership_type, first_name, last_name,
+            # dob, email, phone, address, city, state, zip_code,
+            # join_date, email2, sponsor, card_internal, card_external, deleted_at
+
             self.badge_number_var.set(member[1])
             self.membership_type_var.set(member[2] if member[2] in self.membership_types else "")
             self.first_name_var.set(member[3])
@@ -96,47 +101,35 @@ class MemberForm:
             self.card_internal_var.set(member[15])
             self.card_external_var.set(member[16])
 
+
     def save_member(self):
         try:
+            data = (
+                self.badge_number_var.get(),
+                self.membership_type_var.get(),
+                self.first_name_var.get(),
+                self.last_name_var.get(),
+                self.dob_var.get(),
+                self.email_var.get(),
+                self.phone_var.get(),
+                self.address_var.get(),
+                self.city_var.get(),
+                self.state_var.get(),
+                self.zip_var.get(),
+                self.join_date_var.get(),
+                self.email2_var.get(),
+                self.sponsor_var.get(),
+                self.card_internal_var.get(),
+                self.card_external_var.get()
+            )
+
             if self.member_id:
-                database.update_member(
-                    self.member_id,
-                    self.badge_number_var.get(),
-                    self.membership_type_var.get(),
-                    self.first_name_var.get(),
-                    self.last_name_var.get(),
-                    self.dob_var.get(),
-                    self.email_var.get(),
-                    self.phone_var.get(),
-                    self.address_var.get(),
-                    self.city_var.get(),
-                    self.state_var.get(),
-                    self.zip_var.get(),
-                    self.join_date_var.get(),
-                    self.email2_var.get(),
-                    self.sponsor_var.get(),
-                    self.card_internal_var.get(),
-                    self.card_external_var.get()
-                )
+                # Update existing member
+                database.update_member(self.member_id, data)
             else:
-                database.add_member(
-                    self.badge_number_var.get(),
-                    self.membership_type_var.get(),
-                    self.first_name_var.get(),
-                    self.last_name_var.get(),
-                    self.dob_var.get(),
-                    self.email_var.get(),
-                    self.phone_var.get(),
-                    self.address_var.get(),
-                    self.city_var.get(),
-                    self.state_var.get(),
-                    self.zip_var.get(),
-                    self.join_date_var.get(),
-                    self.email2_var.get(),
-                    self.sponsor_var.get(),
-                    self.card_internal_var.get(),
-                    self.card_external_var.get()
-                )
+                # Insert new member
+                database.add_member(data)
+
             self.top.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save member: {e}")

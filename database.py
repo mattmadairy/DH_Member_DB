@@ -71,16 +71,40 @@ def add_member(data):
         conn.commit()
 
 def update_member(member_id, data):
+    """
+    Update a member, but keep existing values for any blank fields.
+    `data` is the 16-field tuple from MemberForm.
+    """
     with get_connection() as conn:
         c = conn.cursor()
+
+        # Get current record
+        c.execute("SELECT * FROM members WHERE id=?", (member_id,))
+        existing = c.fetchone()
+        if not existing:
+            return False  # no such member
+
+        # existing schema order:
+        # (id, badge_number, membership_type, first_name, last_name,
+        #  dob, email, phone, address, city, state, zip_code,
+        #  join_date, email2, sponsor, card_internal, card_external, deleted_at)
+
+        # Merge: use new value if not empty, else keep existing
+        merged = []
+        for new_val, old_val in zip(data, existing[1:17]):  # skip id, take 16 fields
+            merged.append(new_val if new_val.strip() != "" else old_val)
+
         c.execute("""
             UPDATE members SET
                 badge_number=?, membership_type=?, first_name=?, last_name=?,
                 dob=?, email=?, phone=?, address=?, city=?, state=?, zip_code=?,
                 join_date=?, email2=?, sponsor=?, card_internal=?, card_external=?
             WHERE id=?
-        """, (*data, member_id))
+        """, (*merged, member_id))
+
         conn.commit()
+        return True
+
 
 def soft_delete_member_by_id(member_id):
     with get_connection() as conn:
@@ -164,3 +188,9 @@ def insert_member_from_dict(data: dict):
     conn.commit()
     conn.close()
     return True  # inserted successfully
+
+def get_member_by_id(member_id):
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM members WHERE id=?", (member_id,))
+        return c.fetchone()

@@ -162,15 +162,48 @@ class MemberApp:
         self.all_members_data = []
         members = database.get_all_members()
         for m in members:
-            data = tuple(str(x or "") for x in (
-                m[0], m[1], m[2], m[3], m[4], m[5],
-                m[6], m[13], m[7], m[8], m[9], m[10],
-                m[11], m[12], m[14], m[15], m[16],
-            ))
+            # Match exactly with your columns in _build_gui()
+            data = (
+                str(m[0] or ""),   # ID
+                str(m[1] or ""),   # Badge Number
+                str(m[2] or ""),   # Membership Type
+                str(m[3] or ""),   # First Name
+                str(m[4] or ""),   # Last Name
+                str(m[5] or ""),   # Date of Birth
+                str(m[6] or ""),   # Email Address
+                str(m[13] or ""),  # Email Address 2
+                str(m[7] or ""),   # Phone Number
+                str(m[8] or ""),   # Address
+                str(m[9] or ""),   # City
+                str(m[10] or ""),  # State
+                str(m[11] or ""),  # Zip Code
+                str(m[12] or ""),  # Join Date
+                str(m[14] or ""),  # Sponsor
+                str(m[15] or ""),  # Card/Fob Internal Number
+                str(m[16] or ""),  # Card/Fob External Number
+            )
             self.all_members_data.append(data)
             self.trees["All"].insert("", "end", values=data)
             if m[2] in self.trees:
                 self.trees[m[2]].insert("", "end", values=data)
+
+            # Clear existing
+            for mtype in self.member_types:
+                for row in self.trees[mtype].get_children():
+                    self.trees[mtype].delete(row)
+
+            self.all_members_data = []
+            members = database.get_all_members()
+            for m in members:
+                data = tuple(str(x or "") for x in (
+                    m[0], m[1], m[2], m[3], m[4], m[5],
+                    m[6], m[13], m[7], m[8], m[9], m[10],
+                    m[11], m[12], m[14], m[15], m[16],
+                ))
+                self.all_members_data.append(data)
+                self.trees["All"].insert("", "end", values=data)
+                if m[2] in self.trees:
+                    self.trees[m[2]].insert("", "end", values=data)
 
     def _on_search(self, event=None):
         query = self.search_var.get().lower()
@@ -291,12 +324,29 @@ class MemberApp:
                 tree.delete(row)
             deleted_members = database.get_deleted_members()
             for m in deleted_members:
-                data = tuple(str(x or "") for x in (
-                    m[0], m[1], m[2], m[3], m[4], m[5],
-                    m[6], m[13], m[7], m[8], m[9], m[10], m[11],
-                    m[12], m[14], m[15], m[16], m[17],
-                ))
+                # Match DB schema order exactly, plus deleted_at
+                data = (
+                    str(m[0] or ""),   # ID
+                    str(m[1] or ""),   # Badge Number
+                    str(m[2] or ""),   # Membership Type
+                    str(m[3] or ""),   # First Name
+                    str(m[4] or ""),   # Last Name
+                    str(m[5] or ""),   # Date of Birth
+                    str(m[6] or ""),   # Email Address
+                    str(m[13] or ""),  # Email Address 2
+                    str(m[7] or ""),   # Phone Number
+                    str(m[8] or ""),   # Address
+                    str(m[9] or ""),   # City
+                    str(m[10] or ""),  # State
+                    str(m[11] or ""),  # Zip Code
+                    str(m[12] or ""),  # Join Date
+                    str(m[14] or ""),  # Sponsor
+                    str(m[15] or ""),  # Card/Fob Internal Number
+                    str(m[16] or ""),  # Card/Fob External Number
+                    str(m[17] or ""),  # Deleted At
+                )
                 tree.insert("", "end", values=data)
+
 
         refresh_recycle_bin()
         self.recycle_bin_refresh_fn = refresh_recycle_bin  
