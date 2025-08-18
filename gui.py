@@ -4,6 +4,7 @@ import database
 import sys
 import os
 import member_form
+import reporting_window
 import csv
 from datetime import datetime
 # NOTE: we *intentionally* do not import openpyxl at top-level.
@@ -17,6 +18,28 @@ class MemberApp:
         self.root.geometry("1100x600")
 
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
+                # ----- Menubar -----
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Exit", command=self.root.quit)
+
+        # Members menu
+        members_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Members", menu=members_menu)
+        members_menu.add_command(label="Add Member", command=self.add_member)
+        #
+        # Reports menu (NEW)
+        reports_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Reports", menu=reports_menu)
+        reports_menu.add_command(
+            label="Dues Reports",
+            command=lambda: reporting_window.ReportingWindow(self.root)
+        )
+
 
         # track recycle bin refresh function
         self.recycle_bin_refresh_fn = None

@@ -1,4 +1,4 @@
 print
-dues report
+dues reporting
 work hours  
 meeting credits

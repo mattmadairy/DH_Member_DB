@@ -1,4 +1,4 @@
-import sqlite3
+import sqlite3 
 import os
 import shutil
 import datetime
@@ -35,7 +35,8 @@ def init_db():
             email2 TEXT,
             sponsor TEXT,
             card_internal TEXT,
-            card_external TEXT
+            card_external TEXT,
+            deleted INTEGER DEFAULT 0
         )
     """)
 
@@ -90,7 +91,7 @@ def migrate_all():
     required_members = [
         "id", "badge_number", "membership_type", "first_name", "last_name", "dob",
         "email", "phone", "address", "city", "state", "zip", "join_date",
-        "email2", "sponsor", "card_internal", "card_external"
+        "email2", "sponsor", "card_internal", "card_external", "deleted"
     ]
 
     if set(required_members) != set(existing_cols):
@@ -113,7 +114,8 @@ def migrate_all():
                 email2 TEXT,
                 sponsor TEXT,
                 card_internal TEXT,
-                card_external TEXT
+                card_external TEXT,
+                deleted INTEGER DEFAULT 0
             )
         """, required_members)
 
@@ -179,6 +181,22 @@ def delete_member(member_id):
     conn.close()
 
 
+def soft_delete_member_by_id(member_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE members SET deleted=1 WHERE id=?", (member_id,))
+    conn.commit()
+    conn.close()
+
+
+def restore_member(member_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE members SET deleted=0 WHERE id=?", (member_id,))
+    conn.commit()
+    conn.close()
+
+
 def get_member_by_id(member_id):
     conn = get_connection()
     c = conn.cursor()
@@ -191,7 +209,16 @@ def get_member_by_id(member_id):
 def get_all_members():
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT * FROM members")
+    c.execute("SELECT * FROM members WHERE deleted=0")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def get_deleted_members():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM members WHERE deleted=1")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -254,6 +281,59 @@ def delete_dues_payment(dues_id):
     c.execute("DELETE FROM dues WHERE id=?", (dues_id,))
     conn.commit()
     conn.close()
+
+
+# ------------------ Reporting Functions ------------------ #
+def get_expected_dues(membership_type):
+    """Return the expected yearly dues for a given membership type."""
+    mapping = {
+        "Probationary": 150,
+        "Associate": 300,
+        "Active": 150,
+    }
+    return mapping.get(membership_type, 0)
+
+
+def get_payments_by_year(year):
+    """Return total payments for each member in a given calendar year."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT 
+            m.id,
+            m.first_name,
+            m.last_name,
+            m.membership_type,
+            COALESCE(SUM(d.amount), 0) AS total_paid
+        FROM members m
+        LEFT JOIN dues d 
+          ON m.id = d.member_id 
+         AND strftime('%Y', d.payment_date) = ?
+        WHERE m.deleted=0
+        GROUP BY m.id
+        ORDER BY m.last_name, m.first_name
+    """, (str(year),))
+    rows = c.fetchall()
+    conn.close()
+
+    # add expected dues
+    results = []
+    for row in rows:
+        member_id, first, last, mtype, total_paid = row
+        expected = get_expected_dues(mtype)
+        results.append((member_id, first, last, mtype, total_paid, expected))
+    return results
+
+
+def get_outstanding_dues(year):
+    """Return members who have outstanding dues in a given calendar year."""
+    payments = get_payments_by_year(year)
+    results = []
+    for member_id, first, last, mtype, total_paid, expected in payments:
+        outstanding = expected - total_paid
+        if outstanding > 0:
+            results.append((member_id, first, last, mtype, total_paid, expected, outstanding))
+    return results
 
 
 # ------------------ Auto Init & Migrate ------------------ #
