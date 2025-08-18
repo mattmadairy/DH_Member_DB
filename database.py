@@ -1,6 +1,7 @@
-import sqlite3
+import sqlite3 
 from datetime import datetime
 import os
+import csv
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "members.db")
 
@@ -45,6 +46,10 @@ def init_db():
         """)
         conn.commit()
 
+# -------------------------
+# MEMBERS HELPERS
+# -------------------------
+
 def get_all_members():
     with get_connection() as conn:
         c = conn.cursor()
@@ -78,20 +83,13 @@ def update_member(member_id, data):
     with get_connection() as conn:
         c = conn.cursor()
 
-        # Get current record
         c.execute("SELECT * FROM members WHERE id=?", (member_id,))
         existing = c.fetchone()
         if not existing:
-            return False  # no such member
+            return False
 
-        # existing schema order:
-        # (id, badge_number, membership_type, first_name, last_name,
-        #  dob, email, phone, address, city, state, zip_code,
-        #  join_date, email2, sponsor, card_internal, card_external, deleted_at)
-
-        # Merge: use new value if not empty, else keep existing
         merged = []
-        for new_val, old_val in zip(data, existing[1:17]):  # skip id, take 16 fields
+        for new_val, old_val in zip(data, existing[1:17]):
             merged.append(new_val if new_val.strip() != "" else old_val)
 
         c.execute("""
@@ -104,7 +102,6 @@ def update_member(member_id, data):
 
         conn.commit()
         return True
-
 
 def soft_delete_member_by_id(member_id):
     with get_connection() as conn:
@@ -146,18 +143,12 @@ def get_deletion_log():
         return c.fetchall()
 
 def insert_member_from_dict(data: dict):
-    """
-    Insert a new member from a dictionary of values.
-    Skips if a member with the same Badge Number already exists.
-    """
     conn = get_connection()
     cur = conn.cursor()
-
-    # Check for duplicates by badge number
     cur.execute("SELECT id FROM members WHERE badge_number = ?", (data["Badge Number"],))
     if cur.fetchone():
         conn.close()
-        return False  # duplicate found, skip
+        return False
 
     cur.execute("""
         INSERT INTO members (
@@ -178,19 +169,194 @@ def insert_member_from_dict(data: dict):
         data.get("City", ""),
         data.get("State", ""),
         data.get("Zip Code", ""),
-        data.get("Join Date", datetime.now().strftime("%Y-%m-%d")),  # default join date = today
+        data.get("Join Date", datetime.now().strftime("%Y-%m-%d")),
         data.get("Email Address 2", ""),
         data.get("Sponsor", ""),
         data.get("Card/Fob Internal Number", ""),
         data.get("Card/Fob External Number", ""),
     ))
-
     conn.commit()
     conn.close()
-    return True  # inserted successfully
+    return True
 
 def get_member_by_id(member_id):
     with get_connection() as conn:
         c = conn.cursor()
         c.execute("SELECT * FROM members WHERE id=?", (member_id,))
         return c.fetchone()
+
+# -------------------------
+# DUES HELPERS (per-year tables)
+# -------------------------
+
+def ensure_dues_table(year):
+    """
+    Create the dues table for a given year if it doesn't exist.
+    """
+    table_name = f"{year}_dues"
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+        CREATE TABLE IF NOT EXISTS "{table_name}" (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            payment_date TEXT NOT NULL,
+            payment_method TEXT,
+            notes TEXT,
+            FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+        )
+        """)
+        conn.commit()
+    return table_name
+
+def add_dues_payment(member_id, amount, year, payment_method="", notes=""):
+    table = ensure_dues_table(year)
+    payment_date = datetime.now().strftime("%Y-%m-%d")
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+            INSERT INTO "{table}" (member_id, amount, payment_date, payment_method, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (member_id, amount, payment_date, payment_method, notes))
+        conn.commit()
+
+def get_dues_for_member(member_id, year):
+    table = ensure_dues_table(year)
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT id, amount, payment_date, payment_method, notes
+            FROM "{table}"
+            WHERE member_id=?
+            ORDER BY payment_date DESC
+        """, (member_id,))
+        return c.fetchall()
+
+def has_paid_dues(member_id, year):
+    table = ensure_dues_table(year)
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(f"SELECT 1 FROM \"{table}\" WHERE member_id=? LIMIT 1", (member_id,))
+        return c.fetchone() is not None
+
+def get_members_missing_dues(year):
+    table = ensure_dues_table(year)
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT m.id, m.first_name, m.last_name, m.badge_number, m.email
+            FROM members m
+            WHERE m.deleted_at IS NULL
+              AND m.id NOT IN (
+                  SELECT member_id FROM "{table}"
+              )
+            ORDER BY m.last_name, m.first_name
+        """)
+        return c.fetchall()
+
+def get_dues_summary(year):
+    table = ensure_dues_table(year)
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM members WHERE deleted_at IS NULL")
+        total_members = c.fetchone()[0]
+
+        c.execute(f"SELECT COUNT(DISTINCT member_id) FROM \"{table}\"")
+        paid_members = c.fetchone()[0]
+
+        unpaid_members = total_members - paid_members
+
+        c.execute(f"SELECT SUM(amount) FROM \"{table}\"")
+        total_amount_collected = c.fetchone()[0] or 0.0
+
+        return {
+            "year": year,
+            "total_members": total_members,
+            "paid_members": paid_members,
+            "unpaid_members": unpaid_members,
+            "total_amount_collected": total_amount_collected,
+        }
+
+def export_dues_to_csv(year, filename="dues_export.csv"):
+    table = ensure_dues_table(year)
+    with get_connection() as conn, open(filename, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "Dues ID", "Member ID", "First Name", "Last Name", "Badge Number",
+            "Amount", "Payment Date", "Payment Method", "Notes"
+        ])
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT d.id, m.id, m.first_name, m.last_name, m.badge_number,
+                   d.amount, d.payment_date, d.payment_method, d.notes
+            FROM "{table}" d
+            JOIN members m ON d.member_id = m.id
+            ORDER BY d.payment_date DESC
+        """)
+        for row in c.fetchall():
+            writer.writerow(row)
+    return filename
+
+def export_missing_dues_to_csv(year, filename="missing_dues_export.csv"):
+    table = ensure_dues_table(year)
+    with get_connection() as conn, open(filename, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "Member ID", "First Name", "Last Name", "Badge Number", "Email", "Phone"
+        ])
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT m.id, m.first_name, m.last_name, m.badge_number, m.email, m.phone
+            FROM members m
+            WHERE m.deleted_at IS NULL
+              AND m.id NOT IN (
+                  SELECT member_id FROM "{table}"
+              )
+            ORDER BY m.last_name, m.first_name
+        """)
+        for row in c.fetchall():
+            writer.writerow(row)
+    return filename
+
+def get_dues_by_member(member_id):
+    """
+    Return all dues payments for a given member across all yearly dues tables.
+    """
+    with get_connection() as conn:
+        c = conn.cursor()
+        # Get all dues tables dynamically
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_dues'")
+        dues_tables = [row[0] for row in c.fetchall()]
+
+        results = []
+        for table in dues_tables:
+            c.execute(f"""
+                SELECT id, payment_date, amount, notes, '{table}' as table_name
+                FROM "{table}" 
+                WHERE member_id = ?
+            """, (member_id,))
+            results.extend(c.fetchall())
+
+        # Sort all payments by date descending
+        results.sort(key=lambda r: r[1], reverse=True)
+        return results
+
+
+def add_due_payment(member_id, payment_date, amount, notes="", payment_method="", year=None):
+    """
+    Insert a new dues payment for a member.
+    If no year is given, use the current year.
+    """
+    if year is None:
+        year = datetime.now().year
+    table = ensure_dues_table(year)
+
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+            INSERT INTO "{table}" (member_id, amount, payment_date, payment_method, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (member_id, amount, payment_date, payment_method, notes))
+        conn.commit()
+

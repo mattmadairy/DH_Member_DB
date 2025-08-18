@@ -1,3 +1,4 @@
 print
-add dues table, tracking & filtering 
-
+GUI: dues filtering 
+work hours  
+meeting credits
