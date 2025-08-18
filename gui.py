@@ -390,9 +390,8 @@ class MemberApp:
     # ---------------- MEMBER OPS ---------------- #
     def add_member(self):
         try:
-            form = member_form.MemberForm(self.root)
+            form = self._open_member_form()
             self.root.wait_window(form.top)
-            self.load_data()
         except tk.TclError:
             return
 
@@ -405,9 +404,8 @@ class MemberApp:
                 messagebox.showwarning("No selection", "Please select a member to edit.")
                 return
             member_id = tree.item(selected[0])["values"][0]
-            form = member_form.MemberForm(self.root, member_id)
+            form = self._open_member_form(member_id)
             self.root.wait_window(form.top)
-            self.load_data()
         except tk.TclError:
             return
 
@@ -468,9 +466,8 @@ class MemberApp:
             if not selected:
                 return
             member_id = tree.item(selected[0])["values"][0]
-            form = member_form.MemberForm(self.root, member_id)
+            form = self._open_member_form(member_id)
             self.root.wait_window(form.top)
-            self.load_data()
         except tk.TclError:
             return
 
@@ -488,10 +485,8 @@ class MemberApp:
             return
     
     def _open_member_form(self, member_id=None):
-        form = member_form.MemberForm(self.root, member_id)
-
-        # ✅ Define callback for after save
-        def on_save_callback(saved_id):
+        # ✅ Define callback for after save (now accepts id and type)
+        def on_save_callback(saved_id, saved_type=None):
             self.load_data()  # reload table
             # ✅ Find and select the row for this member_id
             for mtype, tree in self.trees.items():
@@ -503,7 +498,8 @@ class MemberApp:
                         tree.see(row)
                         return
 
-        form.top.on_save_callback = on_save_callback
+        form = member_form.MemberForm(self.root, member_id, on_save_callback=on_save_callback)
+        return form
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
 print
-GUI: dues filtering 
+dues report
 work hours  
 meeting credits

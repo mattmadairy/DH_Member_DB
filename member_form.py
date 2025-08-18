@@ -10,7 +10,7 @@ class MemberForm:
         self.member_id = member_id
         self.on_save_callback = on_save_callback  # ✅ callback for GUI updates
 
-        # ✅ Bind Enter/Return to save member
+        # ✅ Bind Enter/Return to save member (when not editing dues)
         self.top.bind("<Return>", lambda event: self.save_member())
 
         # Notebook (tabs)
@@ -93,12 +93,27 @@ class MemberForm:
         build_fields(self.tab_membership, fields_membership)
 
         # --- Dues History Tab ---
-        self.dues_tree = ttk.Treeview(self.tab_dues, columns=("amount", "date", "method", "notes"), show="headings")
+        self.dues_tree = ttk.Treeview(
+            self.tab_dues,
+            columns=("amount", "date", "method", "notes"),
+            show="headings"
+        )
         self.dues_tree.heading("amount", text="Amount")
         self.dues_tree.heading("date", text="Date")
         self.dues_tree.heading("method", text="Method")
         self.dues_tree.heading("notes", text="Notes")
+
+        # ✅ Adjust column widths
+        self.dues_tree.column("amount", width=80, anchor="e")
+        self.dues_tree.column("date", width=100, anchor="center")
+        self.dues_tree.column("method", width=90, anchor="center")
+        self.dues_tree.column("notes", width=200, anchor="w")
+
         self.dues_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
+
+        # ✅ Double-click or Enter to edit
+        self.dues_tree.bind("<Double-1>", self.on_payment_double_click)
+        self.dues_tree.bind("<Return>", self.on_payment_enter)
 
         # Entry fields for adding new payment
         self.dues_amount_var = tk.StringVar()
@@ -106,19 +121,22 @@ class MemberForm:
         self.dues_method_var = tk.StringVar()
         self.dues_notes_var = tk.StringVar()
 
-        ttk.Label(self.tab_dues, text="Amount").grid(row=1, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_amount_var).grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(self.tab_dues, text="Date").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(self.tab_dues, textvariable=self.dues_date_var, width=12).grid(row=1, column=1, padx=5, pady=2)
 
-        ttk.Label(self.tab_dues, text="Date").grid(row=1, column=2, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_date_var).grid(row=1, column=3, padx=5, pady=2)
+        ttk.Label(self.tab_dues, text="Amount").grid(row=1, column=2, padx=5, pady=2, sticky="e")
+        ttk.Entry(self.tab_dues, textvariable=self.dues_amount_var, width=10).grid(row=1, column=3, padx=5, pady=2)
 
         ttk.Label(self.tab_dues, text="Method").grid(row=2, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_method_var).grid(row=2, column=1, padx=5, pady=2)
+        method_cb = ttk.Combobox(self.tab_dues, textvariable=self.dues_method_var, values=["Cash", "Check", "Electronic"], state="readonly", width=12)
+        method_cb.grid(row=2, column=1, padx=5, pady=2)
 
         ttk.Label(self.tab_dues, text="Notes").grid(row=2, column=2, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_notes_var).grid(row=2, column=3, padx=5, pady=2)
+        ttk.Entry(self.tab_dues, textvariable=self.dues_notes_var, width=25).grid(row=2, column=3, padx=5, pady=2)
 
-        ttk.Button(self.tab_dues, text="Add Payment", command=self.add_dues_payment).grid(row=3, column=0, columnspan=4, pady=5)
+        ttk.Button(self.tab_dues, text="Add Payment", command=self.add_dues_payment).grid(row=3, column=0, pady=5)
+        ttk.Button(self.tab_dues, text="Edit Payment", command=self.edit_dues_payment).grid(row=3, column=1, pady=5)
+        ttk.Button(self.tab_dues, text="Delete Payment", command=self.delete_dues_payment).grid(row=3, column=2, pady=5)
 
         # Save button at bottom
         ttk.Button(self.top, text="Save Member", command=self.save_member).grid(row=1, column=0, pady=10)
@@ -197,7 +215,11 @@ class MemberForm:
         dues_records = database.get_dues_by_member(self.member_id)
         for record in dues_records:
             # record = (id, member_id, amount, payment_date, method, notes)
-            self.dues_tree.insert("", "end", values=(record[2], record[3], record[4], record[5]))
+            amount = record[2]
+            payment_date = record[3]
+            method = record[4]
+            notes = record[5] if len(record) > 5 else ""
+            self.dues_tree.insert("", "end", iid=record[0], values=(amount, payment_date, method, notes))
 
     # --- Add new payment ---
     def add_dues_payment(self):
@@ -209,9 +231,95 @@ class MemberForm:
             date = self.dues_date_var.get()
             method = self.dues_method_var.get()
             notes = self.dues_notes_var.get()
+
             database.add_dues_payment(self.member_id, amount, date, method, notes)
             self.load_dues_history()
             self.dues_amount_var.set("")
             self.dues_notes_var.set("")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add payment: {e}")
+
+    # --- Popup to edit selected payment ---
+    def open_edit_payment_popup(self, dues_id):
+        record = database.get_dues_payment_by_id(dues_id)
+        if not record:
+            messagebox.showerror("Error", "Payment record not found.")
+            return
+
+        popup = tk.Toplevel(self.top)
+        popup.title("Edit Payment")
+        popup.grab_set()  # modal
+
+        amount_var = tk.StringVar(value=str(record[2]))
+        date_var = tk.StringVar(value=record[3])
+        method_var = tk.StringVar(value=record[4])
+        notes_var = tk.StringVar(value=record[5] if len(record) > 5 else "")
+
+        ttk.Label(popup, text="Date").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=date_var).grid(row=0, column=1, padx=5, pady=2)
+
+        ttk.Label(popup, text="Amount").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=amount_var).grid(row=1, column=1, padx=5, pady=2)
+
+        ttk.Label(popup, text="Method").grid(row=2, column=0, padx=5, pady=2, sticky="e")
+        method_cb = ttk.Combobox(popup, textvariable=method_var, values=["Cash", "Check", "Electronic"], state="readonly")
+        method_cb.grid(row=2, column=1, padx=5, pady=2)
+
+        ttk.Label(popup, text="Notes").grid(row=3, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=notes_var).grid(row=3, column=1, padx=5, pady=2)
+
+        def save_changes(event=None):
+            try:
+                database.update_dues_payment(
+                    dues_id,
+                    float(amount_var.get()),
+                    date_var.get(),
+                    method_var.get(),
+                    notes_var.get()
+                )
+                self.load_dues_history()
+                popup.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update payment: {e}")
+
+        ttk.Button(popup, text="Save", command=save_changes).grid(row=4, column=0, columnspan=2, pady=5)
+        popup.bind("<Return>", save_changes)
+
+    # --- Edit selected payment (button) ---
+    def edit_dues_payment(self):
+        selected = self.dues_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Select a payment to edit.")
+            return
+        dues_id = int(selected[0])
+        self.open_edit_payment_popup(dues_id)
+
+    # --- Double-click on row ---
+    def on_payment_double_click(self, event):
+        selected = self.dues_tree.selection()
+        if not selected:
+            return
+        dues_id = int(selected[0])
+        self.open_edit_payment_popup(dues_id)
+
+    # --- Enter key on row ---
+    def on_payment_enter(self, event):
+        selected = self.dues_tree.selection()
+        if not selected:
+            return
+        dues_id = int(selected[0])
+        self.open_edit_payment_popup(dues_id)
+
+    # --- Delete selected payment ---
+    def delete_dues_payment(self):
+        selected = self.dues_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Select a payment to delete.")
+            return
+        dues_id = int(selected[0])
+        if messagebox.askyesno("Confirm", "Are you sure you want to delete this payment?"):
+            try:
+                database.delete_dues_payment(dues_id)
+                self.load_dues_history()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete payment: {e}")
