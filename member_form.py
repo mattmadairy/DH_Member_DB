@@ -95,15 +95,17 @@ class MemberForm:
         # --- Dues History Tab ---
         self.dues_tree = ttk.Treeview(
             self.tab_dues,
-            columns=("amount", "date", "method", "notes"),
+            columns=("year", "amount", "date", "method", "notes"),
             show="headings"
         )
+        self.dues_tree.heading("year", text="Year")
         self.dues_tree.heading("amount", text="Amount")
         self.dues_tree.heading("date", text="Date")
         self.dues_tree.heading("method", text="Method")
         self.dues_tree.heading("notes", text="Notes")
 
         # ✅ Adjust column widths
+        self.dues_tree.column("year", width=60, anchor="center")
         self.dues_tree.column("amount", width=80, anchor="e")
         self.dues_tree.column("date", width=100, anchor="center")
         self.dues_tree.column("method", width=90, anchor="center")
@@ -116,27 +118,37 @@ class MemberForm:
         self.dues_tree.bind("<Return>", self.on_payment_enter)
 
         # Entry fields for adding new payment
+        try:
+            default_year = str(database.get_default_year())
+        except Exception:
+            default_year = datetime.today().strftime("%Y")
+
+        self.dues_year_var = tk.StringVar(value=default_year)
         self.dues_amount_var = tk.StringVar()
         self.dues_date_var = tk.StringVar(value=datetime.today().strftime("%Y-%m-%d"))
         self.dues_method_var = tk.StringVar()
         self.dues_notes_var = tk.StringVar()
 
-        ttk.Label(self.tab_dues, text="Date").grid(row=1, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_date_var, width=12).grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(self.tab_dues, text="Year").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(self.tab_dues, textvariable=self.dues_year_var, width=6).grid(row=1, column=1, padx=5, pady=2)
 
-        ttk.Label(self.tab_dues, text="Amount").grid(row=1, column=2, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_amount_var, width=10).grid(row=1, column=3, padx=5, pady=2)
+        ttk.Label(self.tab_dues, text="Date").grid(row=1, column=2, padx=5, pady=2, sticky="e")
+        ttk.Entry(self.tab_dues, textvariable=self.dues_date_var, width=12).grid(row=1, column=3, padx=5, pady=2)
 
-        ttk.Label(self.tab_dues, text="Method").grid(row=2, column=0, padx=5, pady=2, sticky="e")
-        method_cb = ttk.Combobox(self.tab_dues, textvariable=self.dues_method_var, values=["Cash", "Check", "Electronic"], state="readonly", width=12)
-        method_cb.grid(row=2, column=1, padx=5, pady=2)
+        ttk.Label(self.tab_dues, text="Amount").grid(row=2, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(self.tab_dues, textvariable=self.dues_amount_var, width=10).grid(row=2, column=1, padx=5, pady=2)
 
-        ttk.Label(self.tab_dues, text="Notes").grid(row=2, column=2, padx=5, pady=2, sticky="e")
-        ttk.Entry(self.tab_dues, textvariable=self.dues_notes_var, width=25).grid(row=2, column=3, padx=5, pady=2)
+        ttk.Label(self.tab_dues, text="Method").grid(row=2, column=2, padx=5, pady=2, sticky="e")
+        method_cb = ttk.Combobox(self.tab_dues, textvariable=self.dues_method_var,
+                                 values=["Cash", "Check", "Electronic"], state="readonly", width=12)
+        method_cb.grid(row=2, column=3, padx=5, pady=2)
 
-        ttk.Button(self.tab_dues, text="Add Payment", command=self.add_dues_payment).grid(row=3, column=0, pady=5)
-        ttk.Button(self.tab_dues, text="Edit Payment", command=self.edit_dues_payment).grid(row=3, column=1, pady=5)
-        ttk.Button(self.tab_dues, text="Delete Payment", command=self.delete_dues_payment).grid(row=3, column=2, pady=5)
+        ttk.Label(self.tab_dues, text="Notes").grid(row=3, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(self.tab_dues, textvariable=self.dues_notes_var, width=25).grid(row=3, column=1, columnspan=3, padx=5, pady=2)
+
+        ttk.Button(self.tab_dues, text="Add Payment", command=self.add_dues_payment).grid(row=4, column=0, pady=5)
+        ttk.Button(self.tab_dues, text="Edit Payment", command=self.edit_dues_payment).grid(row=4, column=1, pady=5)
+        ttk.Button(self.tab_dues, text="Delete Payment", command=self.delete_dues_payment).grid(row=4, column=2, pady=5)
 
         # Save button at bottom
         ttk.Button(self.top, text="Save Member", command=self.save_member).grid(row=1, column=0, pady=10)
@@ -214,12 +226,13 @@ class MemberForm:
             self.dues_tree.delete(row)
         dues_records = database.get_dues_by_member(self.member_id)
         for record in dues_records:
-            # record = (id, member_id, amount, payment_date, method, notes)
+            # record = (id, member_id, amount, payment_date, year, method, notes)
             amount = record[2]
             payment_date = record[3]
-            method = record[4]
-            notes = record[5] if len(record) > 5 else ""
-            self.dues_tree.insert("", "end", iid=record[0], values=(amount, payment_date, method, notes))
+            year = record[4]
+            method = record[5]
+            notes = record[6] if len(record) > 6 else ""
+            self.dues_tree.insert("", "end", iid=record[0], values=(year, amount, payment_date, method, notes))
 
     # --- Add new payment ---
     def add_dues_payment(self):
@@ -229,10 +242,11 @@ class MemberForm:
         try:
             amount = float(self.dues_amount_var.get())
             date = self.dues_date_var.get()
+            year = self.dues_year_var.get()
             method = self.dues_method_var.get()
             notes = self.dues_notes_var.get()
 
-            database.add_dues_payment(self.member_id, amount, date, method, notes)
+            database.add_dues_payment(self.member_id, amount, date, method, notes, year)
             self.load_dues_history()
             self.dues_amount_var.set("")
             self.dues_notes_var.set("")
@@ -252,21 +266,26 @@ class MemberForm:
 
         amount_var = tk.StringVar(value=str(record[2]))
         date_var = tk.StringVar(value=record[3])
-        method_var = tk.StringVar(value=record[4])
-        notes_var = tk.StringVar(value=record[5] if len(record) > 5 else "")
+        year_var = tk.StringVar(value=record[4])
+        method_var = tk.StringVar(value=record[5])
+        notes_var = tk.StringVar(value=record[6] if len(record) > 6 else "")
 
-        ttk.Label(popup, text="Date").grid(row=0, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=date_var).grid(row=0, column=1, padx=5, pady=2)
+        ttk.Label(popup, text="Year").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=year_var, width=6).grid(row=0, column=1, padx=5, pady=2)
 
-        ttk.Label(popup, text="Amount").grid(row=1, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=amount_var).grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(popup, text="Date").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=date_var).grid(row=1, column=1, padx=5, pady=2)
 
-        ttk.Label(popup, text="Method").grid(row=2, column=0, padx=5, pady=2, sticky="e")
-        method_cb = ttk.Combobox(popup, textvariable=method_var, values=["Cash", "Check", "Electronic"], state="readonly")
-        method_cb.grid(row=2, column=1, padx=5, pady=2)
+        ttk.Label(popup, text="Amount").grid(row=2, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=amount_var).grid(row=2, column=1, padx=5, pady=2)
 
-        ttk.Label(popup, text="Notes").grid(row=3, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=notes_var).grid(row=3, column=1, padx=5, pady=2)
+        ttk.Label(popup, text="Method").grid(row=3, column=0, padx=5, pady=2, sticky="e")
+        method_cb = ttk.Combobox(popup, textvariable=method_var,
+                                 values=["Cash", "Check", "Electronic"], state="readonly")
+        method_cb.grid(row=3, column=1, padx=5, pady=2)
+
+        ttk.Label(popup, text="Notes").grid(row=4, column=0, padx=5, pady=2, sticky="e")
+        ttk.Entry(popup, textvariable=notes_var).grid(row=4, column=1, padx=5, pady=2)
 
         def save_changes(event=None):
             try:
@@ -275,14 +294,15 @@ class MemberForm:
                     float(amount_var.get()),
                     date_var.get(),
                     method_var.get(),
-                    notes_var.get()
+                    notes_var.get(),
+                    year_var.get()
                 )
                 self.load_dues_history()
                 popup.destroy()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to update payment: {e}")
 
-        ttk.Button(popup, text="Save", command=save_changes).grid(row=4, column=0, columnspan=2, pady=5)
+        ttk.Button(popup, text="Save", command=save_changes).grid(row=5, column=0, columnspan=2, pady=5)
         popup.bind("<Return>", save_changes)
 
     # --- Edit selected payment (button) ---

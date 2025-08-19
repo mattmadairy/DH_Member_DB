@@ -5,7 +5,11 @@ import sys
 import os
 import member_form
 import reporting_window
+import settings_window
 import csv
+import tempfile
+import platform
+import subprocess
 from datetime import datetime
 # NOTE: we *intentionally* do not import openpyxl at top-level.
 # We'll import it lazily inside _show_import_dialog() if needed.
@@ -18,28 +22,38 @@ class MemberApp:
         self.root.geometry("1100x600")
 
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
-                # ----- Menubar -----
+
+        # ----- Menubar -----
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Import ⬆️", command=self._show_import_dialog)
+        file_menu.add_command(label="Export ⬇️", command=self._show_export_dialog)
+        file_menu.add_separator()
+        file_menu.add_command(label="Print Current Tab 🖨", command=self._print_members)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
 
         # Members menu
         members_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Members", menu=members_menu)
         members_menu.add_command(label="Add Member", command=self.add_member)
-        #
-        # Reports menu (NEW)
+
+        # Reports menu
         reports_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Reports", menu=reports_menu)
         reports_menu.add_command(
-            label="Dues Reports",
+            label="Dues Report",
             command=lambda: reporting_window.ReportingWindow(self.root)
         )
 
+        # Settings menu
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu.add_command(label="Preferences", command=self.open_settings)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
 
         # track recycle bin refresh function
         self.recycle_bin_refresh_fn = None
@@ -92,6 +106,10 @@ class MemberApp:
         self._build_gui()
         self.load_data()
 
+        # --- Keyboard shortcuts ---
+        self.root.bind_all("<Control-p>", lambda e: self._print_members())   # Windows/Linux
+        self.root.bind_all("<Command-p>", lambda e: self._print_members())   # macOS
+
     def _make_tree_with_scrollbars(self, parent, columns):
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True)
@@ -136,9 +154,6 @@ class MemberApp:
         search_entry.pack(side="left", padx=5)
         search_entry.bind("<KeyRelease>", self._on_search)
 
-        # Buttons aligned right
-        ttk.Button(search_frame, text="Export ⬇️", command=self._show_export_dialog).pack(side="right", padx=2)
-        ttk.Button(search_frame, text="Import ⬆️", command=self._show_import_dialog).pack(side="right", padx=2)
         ttk.Button(search_frame, text="🗑️ Recycle Bin", command=self._show_recycle_bin).pack(side="right", padx=2)
         ttk.Button(search_frame, text="❌ Delete Selected", command=self.delete_selected).pack(side="right", padx=2)
         ttk.Button(search_frame, text="✏️ Edit Selected", command=self.edit_selected).pack(side="right", padx=2)
@@ -155,116 +170,110 @@ class MemberApp:
             "Card/Fob Internal Number", "Card/Fob External Number",
         )
 
+        self.context_menu_main = tk.Menu(self.root, tearoff=0)
+        self.context_menu_main.add_command(label="✏️ Edit", command=self.edit_selected)
+        self.context_menu_main.add_command(label="❌ Delete", command=self.delete_selected)
+
         for mtype in self.member_types:
             frame = ttk.Frame(self.notebook)
             self.notebook.add(frame, text=mtype)
 
             tree = self._make_tree_with_scrollbars(frame, columns)
             tree.bind("<Double-1>", self._on_tree_double_click)
+            tree.bind("<Button-3>", self._on_right_click_main)
+            tree.bind("<Button-2>", self._on_right_click_main)
+            tree.bind("<Control-Button-1>", self._on_right_click_main)
+
             self.trees[mtype] = tree
 
+    # ---------------- SORTING ---------------- #
     def _sort_treeview(self, tree, col, reverse):
         items = [(tree.set(k, col), k) for k in tree.get_children("")]
         try:
             if col == "Badge Number":
-                items.sort(key=lambda t: int(t[0]) if t[0].isdigit() else float("inf"), reverse=reverse)
+                items.sort(key=lambda t: int(t[0]) if str(t[0]).isdigit() else float("inf"), reverse=reverse)
             else:
                 items.sort(key=lambda t: t[0].lower() if isinstance(t[0], str) else t[0], reverse=reverse)
         except Exception:
             items.sort(reverse=reverse)
 
-        for index, (val, k) in enumerate(items):
+        for index, (_, k) in enumerate(items):
             tree.move(k, "", index)
         tree.heading(col, command=lambda: self._sort_treeview(tree, col, not reverse))
 
-    def load_data(self):
-        """Reload all member data into every tree. Fully safe against app shutdown."""
-        # Try to clear existing rows
-        try:
-            for tree in self.trees.values():
-                tree.delete(*tree.get_children())
-        except tk.TclError:
-            # App is closing; bail out quietly.
+    # ---------------- PRINT MEMBERS ---------------- #
+    def _print_members(self):
+        current_tab = self.notebook.tab(self.notebook.select(), "text")
+        tree = self.trees[current_tab]
+
+        items = tree.get_children()
+        if not items:
+            messagebox.showwarning("Print", "No members to print in this view.")
             return
 
-        # Fetch from DB
-        try:
-            members = database.get_all_members()
-        except Exception as e:
-            # Only show dialog if UI is alive
+        headings = [tree.heading(col)["text"] for col in tree["columns"]]
+        rows = [headings]
+        for item in items:
+            rows.append(tree.item(item, "values"))
+
+        col_widths = [max(len(str(row[i])) for row in rows) for i in range(len(headings))]
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        width_sum = sum(col_widths) + 3 * (len(col_widths) - 1)
+
+        lines = [
+            "Membership List".center(width_sum),
+            f"Tab: {current_tab}".center(width_sum),
+            f"Generated: {timestamp}".center(width_sum),
+            ""
+        ]
+
+        for idx, row in enumerate(rows):
+            line = "   ".join(str(row[i]).ljust(col_widths[i]) for i in range(len(row)))
+            if idx == 0:
+                lines.append(line)
+                lines.append("-" * len(line))
+            else:
+                lines.append(line)
+        lines.append("")
+        lines.append("End of List".center(width_sum))
+
+        report_text = "\n".join(lines)
+
+        preview = tk.Toplevel(self.root)
+        preview.title("Print Preview - Members")
+        preview.geometry("800x600")
+
+        text = tk.Text(preview, wrap="none")
+        text.insert("1.0", report_text)
+        text.configure(state="disabled")
+        text.pack(fill="both", expand=True, padx=5, pady=5)
+
+        yscroll = ttk.Scrollbar(preview, orient="vertical", command=text.yview)
+        xscroll = ttk.Scrollbar(preview, orient="horizontal", command=text.xview)
+        text.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
+        yscroll.pack(side="right", fill="y")
+        xscroll.pack(side="bottom", fill="x")
+
+        btn_frame = tk.Frame(preview)
+        btn_frame.pack(fill="x", pady=5)
+
+        def do_print():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
+            tmp.write(report_text.encode("utf-8"))
+            tmp.close()
             try:
-                messagebox.showerror("Database Error", f"Failed to load members: {e}")
-            except tk.TclError:
-                pass
-            return
+                system = platform.system()
+                if system == "Windows":
+                    os.startfile(tmp.name, "print")
+                elif system == "Darwin":
+                    subprocess.run(["lp", tmp.name], check=False)
+                else:
+                    subprocess.run(["lpr", tmp.name], check=False)
+            except Exception as e:
+                messagebox.showerror("Print Error", f"Failed to print: {e}")
 
-        # Rebuild rows
-        self.all_members_data = []
-        try:
-            for m in members:
-                data = (
-                    str(m[0] or ""),   # ID
-                    str(m[1] or ""),   # Badge Number
-                    str(m[2] or ""),   # Membership Type
-                    str(m[3] or ""),   # First Name
-                    str(m[4] or ""),   # Last Name
-                    str(m[5] or ""),   # Date of Birth
-                    str(m[6] or ""),   # Email Address
-                    str(m[13] or ""),  # Email Address 2
-                    str(m[7] or ""),   # Phone Number
-                    str(m[8] or ""),   # Address
-                    str(m[9] or ""),   # City
-                    str(m[10] or ""),  # State
-                    str(m[11] or ""),  # Zip Code
-                    str(m[12] or ""),  # Join Date
-                    str(m[14] or ""),  # Sponsor
-                    str(m[15] or ""),  # Card/Fob Internal Number
-                    str(m[16] or ""),  # Card/Fob External Number
-                )
-                self.all_members_data.append(data)
-
-                # Insert into "All"
-                tree_all = self.trees.get("All")
-                if tree_all:
-                    tree_all.insert("", "end", values=data)
-
-                # Insert into specific membership-type tab (if present)
-                member_type = m[2]
-                tree_type = self.trees.get(member_type)
-                if tree_type:
-                    tree_type.insert("", "end", values=data)
-        except tk.TclError:
-            # App is closing; ignore
-            return
-
-    def _on_search(self, event=None):
-        """Live filter across all tabs; safe against app shutdown."""
-        query = (self.search_var.get() or "").lower()
-
-        try:
-            for mtype, tree in self.trees.items():
-                # Only filter the visible member tabs; recycle bin is in its own window
-                tree.delete(*tree.get_children())
-
-            filtered = (
-                [row for row in self.all_members_data if any(query in str(val).lower() for val in row)]
-                if query else self.all_members_data
-            )
-
-            # Refill per tab
-            for data in filtered:
-                # All
-                t_all = self.trees.get("All")
-                if t_all:
-                    t_all.insert("", "end", values=data)
-
-                # Specific type
-                mt = data[2]
-                t_type = self.trees.get(mt)
-                if t_type:
-                    t_type.insert("", "end", values=data)
-        except tk.TclError:
-            return
+        ttk.Button(btn_frame, text="🖨 Print", command=do_print).pack(side="right", padx=5)
+        ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=5)
 
     # ---------------- EXPORT ---------------- #
     def _show_export_dialog(self):
@@ -363,6 +372,89 @@ class MemberApp:
         messagebox.showinfo("Import Complete", f"Imported {count} members.")
         self.load_data()
 
+    # ---------------- DATA LOADING ---------------- #
+    def load_data(self):
+        """Reload all member data into every tree. Fully safe against app shutdown."""
+        try:
+            for tree in self.trees.values():
+                tree.delete(*tree.get_children())
+        except tk.TclError:
+            return
+
+        try:
+            members = database.get_all_members()
+        except Exception as e:
+            try:
+                messagebox.showerror("Database Error", f"Failed to load members: {e}")
+            except tk.TclError:
+                pass
+            return
+
+        self.all_members_data = []
+        try:
+            for m in members:
+                data = (
+                    str(m[0] or ""),   # ID
+                    str(m[1] or ""),   # Badge Number
+                    str(m[2] or ""),   # Membership Type
+                    str(m[3] or ""),   # First Name
+                    str(m[4] or ""),   # Last Name
+                    str(m[5] or ""),   # Date of Birth
+                    str(m[6] or ""),   # Email Address
+                    str(m[13] or ""),  # Email Address 2
+                    str(m[7] or ""),   # Phone Number
+                    str(m[8] or ""),   # Address
+                    str(m[9] or ""),   # City
+                    str(m[10] or ""),  # State
+                    str(m[11] or ""),  # Zip Code
+                    str(m[12] or ""),  # Join Date
+                    str(m[14] or ""),  # Sponsor
+                    str(m[15] or ""),  # Card/Fob Internal Number
+                    str(m[16] or ""),  # Card/Fob External Number
+                )
+                self.all_members_data.append(data)
+
+                # Insert into "All"
+                tree_all = self.trees.get("All")
+                if tree_all:
+                    tree_all.insert("", "end", values=data)
+
+                # Insert into specific membership-type tab (if present)
+                member_type = m[2]
+                tree_type = self.trees.get(member_type)
+                if tree_type:
+                    tree_type.insert("", "end", values=data)
+        except tk.TclError:
+            return
+
+    def _on_search(self, event=None):
+        """Live filter across all tabs; safe against app shutdown."""
+        query = (self.search_var.get() or "").lower()
+
+        try:
+            for tree in self.trees.values():
+                tree.delete(*tree.get_children())
+
+            filtered = (
+                [row for row in self.all_members_data if any(query in str(val).lower() for val in row)]
+                if query else self.all_members_data
+            )
+
+            # Refill per tab
+            for data in filtered:
+                # All
+                t_all = self.trees.get("All")
+                if t_all:
+                    t_all.insert("", "end", values=data)
+
+                # Specific type
+                mt = data[2]
+                t_type = self.trees.get(mt)
+                if t_type:
+                    t_type.insert("", "end", values=data)
+        except tk.TclError:
+            return
+
     # ---------------- RECYCLE BIN ---------------- #
     def _show_recycle_bin(self):
         win = tk.Toplevel(self.root)
@@ -398,11 +490,32 @@ class MemberApp:
         refresh_recycle_bin()
         self.recycle_bin_refresh_fn = refresh_recycle_bin
 
+        # Buttons
         ttk.Button(win, text="Restore Selected",
                    command=lambda: self.restore_selected(tree, refresh_recycle_bin)).pack(pady=5)
         ttk.Button(win, text="Delete Permanently",
                    command=lambda: self.permanent_delete_selected(tree, refresh_recycle_bin)).pack(pady=5)
         tree.bind("<Double-1>", lambda event, _tree=tree: self._on_double_click_deleted(event, _tree, refresh_recycle_bin))
+
+        # --- Right-click menu for recycle bin ---
+        menu_recycle = tk.Menu(win, tearoff=0)
+        menu_recycle.add_command(label="Restore Selected",
+                                 command=lambda: self.restore_selected(tree, refresh_recycle_bin))
+        menu_recycle.add_command(label="Delete Permanently",
+                                 command=lambda: self.permanent_delete_selected(tree, refresh_recycle_bin))
+
+        def on_recycle_right_click(event, _tree=tree, _menu=menu_recycle):
+            row_id = _tree.identify_row(event.y)
+            if row_id:
+                _tree.selection_set(row_id)
+            try:
+                _menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                _menu.grab_release()
+
+        tree.bind("<Button-3>", on_recycle_right_click)
+        tree.bind("<Button-2>", on_recycle_right_click)
+        tree.bind("<Control-Button-1>", on_recycle_right_click)
 
         def on_close():
             self.recycle_bin_refresh_fn = None
@@ -506,16 +619,34 @@ class MemberApp:
                 refresh_recycle_bin()
         except tk.TclError:
             return
-    
+
+    # --- Right-click handler for main trees ---
+    def _on_right_click_main(self, event):
+        try:
+            tree = event.widget
+            # Select row under cursor (so actions apply to what you right-clicked)
+            row_id = tree.identify_row(event.y)
+            if row_id:
+                # If ctrl/shift has a multi-selection, keep it. Otherwise select single row.
+                if row_id not in tree.selection():
+                    tree.selection_set(row_id)
+            # Show context menu
+            try:
+                self.context_menu_main.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.context_menu_main.grab_release()
+        except tk.TclError:
+            return
+
     def _open_member_form(self, member_id=None):
-        # ✅ Define callback for after save (now accepts id and type)
+        # Define callback for after save (accepts id and optional type)
         def on_save_callback(saved_id, saved_type=None):
-            self.load_data()  # reload table
-            # ✅ Find and select the row for this member_id
+            self.load_data()
+            # Find and select the row for this member_id
             for mtype, tree in self.trees.items():
                 for row in tree.get_children():
                     values = tree.item(row, "values")
-                    if str(values[0]) == str(saved_id):  # assuming first col = ID
+                    if str(values[0]) == str(saved_id):  # first col = ID
                         tree.selection_set(row)
                         tree.focus(row)
                         tree.see(row)
@@ -524,8 +655,12 @@ class MemberApp:
         form = member_form.MemberForm(self.root, member_id, on_save_callback=on_save_callback)
         return form
 
+    def open_settings(self):
+        settings_window.SettingsWindow(self.root)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = MemberApp(root)
     root.mainloop()
+
