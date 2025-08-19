@@ -29,10 +29,10 @@ class ReportingWindow(tk.Toplevel):
             top, from_=2000, to=2100, textvariable=self.year_var, width=6
         ).pack(side=tk.LEFT)
 
-        tk.Button(top, text="Payments", command=lambda: self.populate_report(False)).pack(
+        tk.Button(top, text="Run Paid Report", command=lambda: self.populate_report(False)).pack(
             side=tk.LEFT, padx=10
         )
-        tk.Button(top, text="Outstanding", command=lambda: self.populate_report(True)).pack(
+        tk.Button(top, text="Run Outstanding Report", command=lambda: self.populate_report(True)).pack(
             side=tk.LEFT, padx=2
         )
         tk.Button(top, text="Print Report", command=self.print_report).pack(
@@ -66,7 +66,6 @@ class ReportingWindow(tk.Toplevel):
         table_frame = tk.Frame(self)
         table_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Badge first now
         cols = ("badge", "name", "type", "paid", "expected", "outstanding", "last_payment")
         self.tree = ttk.Treeview(
             table_frame,
@@ -84,14 +83,14 @@ class ReportingWindow(tk.Toplevel):
         self.tree.heading("outstanding", text="Outstanding", command=lambda c="outstanding": self.sort_by(c))
         self.tree.heading("last_payment", text="Last Payment", command=lambda c="last_payment": self.sort_by(c))
 
-        # Column widths
-        self.tree.column("badge", width=90, anchor="center")
+        # Column widths (all left-justified)
+        self.tree.column("badge", width=90, anchor="w")
         self.tree.column("name", width=220, anchor="w")
         self.tree.column("type", width=110, anchor="w")
-        self.tree.column("paid", width=90, anchor="e")
-        self.tree.column("expected", width=90, anchor="e")
-        self.tree.column("outstanding", width=110, anchor="e")
-        self.tree.column("last_payment", width=130, anchor="center")
+        self.tree.column("paid", width=90, anchor="w")
+        self.tree.column("expected", width=90, anchor="w")
+        self.tree.column("outstanding", width=110, anchor="w")
+        self.tree.column("last_payment", width=130, anchor="w")
 
         # Scrollbars
         vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
@@ -136,15 +135,26 @@ class ReportingWindow(tk.Toplevel):
         for first, last, mtype, paid, expected, outstanding, badge, last_payment in rows:
             name = f"{last}, {first}"
             paid_f = float(paid or 0)
+
+            # Start with DB values
             expected_f = float(expected or 0)
             outstanding_f = float(outstanding) if outstanding is not None else (expected_f - paid_f)
+
+            # Override for Life members
+            if mtype == "Life":
+                try:
+                    life_dues = float(database.get_setting("dues_life") or 0)
+                    expected_f = life_dues
+                    outstanding_f = expected_f - paid_f
+                except Exception:
+                    expected_f = 0.0
+                    outstanding_f = 0.0
 
             paid_s = f"${paid_f:,.2f}" if paid_f else "$0.00"
             expected_s = f"${expected_f:,.2f}" if expected_f else "$0.00"
             outstanding_s = f"${outstanding_f:,.2f}" if outstanding_f else "$0.00"
             last_payment_s = last_payment if last_payment else ""
 
-            # Badge first now
             self.tree.insert(
                 "",
                 tk.END,
@@ -219,7 +229,6 @@ class ReportingWindow(tk.Toplevel):
 
         report_text = "\n".join(lines)
 
-        # --- Preview Window ---
         preview = tk.Toplevel(self)
         preview.title("Print Preview")
         preview.geometry("700x500")
@@ -275,6 +284,7 @@ class ReportingWindow(tk.Toplevel):
                 writer = csv.writer(f)
                 writer.writerow([self.tree.heading(col)["text"] for col in self.tree["columns"]])
                 for item in items:
+                    # row values already reflect Life dues override
                     writer.writerow(self.tree.item(item, "values"))
             messagebox.showinfo("Export", f"Report exported successfully:\n{file_path}")
         except Exception as e:

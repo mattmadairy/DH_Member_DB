@@ -106,9 +106,9 @@ class MemberForm:
 
         # ✅ Adjust column widths
         self.dues_tree.column("year", width=60, anchor="center")
-        self.dues_tree.column("amount", width=80, anchor="e")
-        self.dues_tree.column("date", width=100, anchor="center")
-        self.dues_tree.column("method", width=90, anchor="center")
+        self.dues_tree.column("amount", width=80, anchor="w")
+        self.dues_tree.column("date", width=100, anchor="w")
+        self.dues_tree.column("method", width=90, anchor="w")
         self.dues_tree.column("notes", width=200, anchor="w")
 
         self.dues_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
@@ -227,7 +227,7 @@ class MemberForm:
         dues_records = database.get_dues_by_member(self.member_id)
         for record in dues_records:
             # record = (id, member_id, amount, payment_date, year, method, notes)
-            amount = record[2]
+            amount = f"{float(record[2]):.2f}" if record[2] not in (None, "") else ""
             payment_date = record[3]
             year = record[4]
             method = record[5]
@@ -264,7 +264,8 @@ class MemberForm:
         popup.title("Edit Payment")
         popup.grab_set()  # modal
 
-        amount_var = tk.StringVar(value=str(record[2]))
+        amount_var = tk.StringVar(value=f"{float(record[2]):.2f}")
+
         date_var = tk.StringVar(value=record[3])
         year_var = tk.StringVar(value=record[4])
         method_var = tk.StringVar(value=record[5])

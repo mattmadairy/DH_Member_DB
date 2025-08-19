@@ -30,6 +30,10 @@ class MemberApp:
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="➕ Add Member", command=self.add_member)
+        file_menu.add_command(label="✏️ Edit Selected", command=self.edit_selected)
+        file_menu.add_command(label="❌ Delete Selected", command=self.delete_selected)
+        file_menu.add_separator()
         file_menu.add_command(label="Import ⬆️", command=self._show_import_dialog)
         file_menu.add_command(label="Export ⬇️", command=self._show_export_dialog)
         file_menu.add_separator()
@@ -49,12 +53,12 @@ class MemberApp:
             label="Dues Report",
             command=lambda: reporting_window.ReportingWindow(self.root)
         )
+        # Recycle Bin
+        menubar.add_command(label="Recycle Bin", command=self._show_recycle_bin)
 
         # Settings menu
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(label="Preferences", command=self.open_settings)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-
+        menubar.add_command(label="Settings", command=self.open_settings)
+        
         # track recycle bin refresh function
         self.recycle_bin_refresh_fn = None
 
@@ -125,7 +129,7 @@ class MemberApp:
             else:
                 tree.heading(col, text=col,
                              command=lambda _col=col, _tree=tree: self._sort_treeview(_tree, _col, False))
-                tree.column(col, width=120, anchor="center")
+                tree.column(col, width=120, anchor="w")
 
         yscroll = ttk.Scrollbar(container, orient="vertical", style="Custom.Vertical.TScrollbar")
         xscroll = ttk.Scrollbar(parent, orient="horizontal", style="Custom.Horizontal.TScrollbar")
@@ -148,16 +152,19 @@ class MemberApp:
         search_frame = tk.Frame(toolbar)
         search_frame.pack(fill="x", padx=5, pady=3)
 
-        tk.Label(search_frame, text="Search:").pack(side="left")
+        #tk.Label(search_frame, text="Search:").pack(side="right")
         self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=40)
-        search_entry.pack(side="left", padx=5)
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=40, justify="left")
+        search_entry.pack(side="right", padx=5)
         search_entry.bind("<KeyRelease>", self._on_search)
-
-        ttk.Button(search_frame, text="🗑️ Recycle Bin", command=self._show_recycle_bin).pack(side="right", padx=2)
-        ttk.Button(search_frame, text="❌ Delete Selected", command=self.delete_selected).pack(side="right", padx=2)
-        ttk.Button(search_frame, text="✏️ Edit Selected", command=self.edit_selected).pack(side="right", padx=2)
-        ttk.Button(search_frame, text="➕ Add Member", command=self.add_member).pack(side="right", padx=2)
+        tk.Label(search_frame, text="Search:").pack(side="right")
+        
+        # Quick Buttons
+        
+        #ttk.Button(search_frame, text="🗑️ Recycle Bin", command=self._show_recycle_bin).pack(side="right", padx=2)
+        #ttk.Button(search_frame, text="❌ Delete Selected", command=self.delete_selected).pack(side="right", padx=2)
+        #ttk.Button(search_frame, text="✏️ Edit Selected", command=self.edit_selected).pack(side="right", padx=2)
+        #ttk.Button(search_frame, text="➕ Add Member", command=self.add_member).pack(side="right", padx=2)
 
         # Notebook tabs
         self.notebook = ttk.Notebook(self.root)
@@ -173,6 +180,9 @@ class MemberApp:
         self.context_menu_main = tk.Menu(self.root, tearoff=0)
         self.context_menu_main.add_command(label="✏️ Edit", command=self.edit_selected)
         self.context_menu_main.add_command(label="❌ Delete", command=self.delete_selected)
+        
+        self.context_menu_blank = tk.Menu(self.root, tearoff=0)
+        self.context_menu_blank.add_command(label="➕ Add Member", command=self.add_member)
 
         for mtype in self.member_types:
             frame = ttk.Frame(self.notebook)
@@ -183,8 +193,16 @@ class MemberApp:
             tree.bind("<Button-3>", self._on_right_click_main)
             tree.bind("<Button-2>", self._on_right_click_main)
             tree.bind("<Control-Button-1>", self._on_right_click_main)
+            tree.bind("<Button-1>", self._on_tree_click, add="+")
+
 
             self.trees[mtype] = tree
+    def _on_tree_click(self, event):
+        tree = event.widget
+        row_id = tree.identify_row(event.y)
+        if row_id == "":
+            # Clicked on empty area → clear current selection
+            tree.selection_remove(tree.selection())
 
     # ---------------- SORTING ---------------- #
     def _sort_treeview(self, tree, col, reverse):
@@ -624,19 +642,22 @@ class MemberApp:
     def _on_right_click_main(self, event):
         try:
             tree = event.widget
-            # Select row under cursor (so actions apply to what you right-clicked)
             row_id = tree.identify_row(event.y)
-            if row_id:
-                # If ctrl/shift has a multi-selection, keep it. Otherwise select single row.
+
+            if row_id:  # right-clicked on a row
                 if row_id not in tree.selection():
                     tree.selection_set(row_id)
-            # Show context menu
+                menu = self.context_menu_main
+            else:       # right-clicked on blank space
+                menu = self.context_menu_blank
+
             try:
-                self.context_menu_main.tk_popup(event.x_root, event.y_root)
+                menu.tk_popup(event.x_root, event.y_root)
             finally:
-                self.context_menu_main.grab_release()
+                menu.grab_release()
         except tk.TclError:
             return
+
 
     def _open_member_form(self, member_id=None):
         # Define callback for after save (accepts id and optional type)
