@@ -270,6 +270,20 @@ def soft_delete_member_by_id(member_id):
     conn.commit()
     conn.close()
 
+def permanent_delete_member(member_id):
+    """
+    Permanently delete a member from the database.
+    Unlike soft_delete_member_by_id, this removes the row completely.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM members WHERE id = ?", (member_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 
 def restore_member(member_id):
     conn = get_connection()
@@ -304,6 +318,43 @@ def get_deleted_members():
     rows = c.fetchall()
     conn.close()
     return rows
+
+def insert_member_from_dict(data: dict):
+    """
+    Insert a member using a dictionary (from CSV).
+    Keys must match the members table schema.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            INSERT INTO members (
+                badge_number, membership_type, first_name, last_name, dob,
+                email, phone, address, city, state, zip,
+                join_date, email2, sponsor, card_internal, card_external
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.get("badge_number"),
+            data.get("membership_type"),
+            data.get("first_name"),
+            data.get("last_name"),
+            data.get("dob"),
+            data.get("email"),
+            data.get("phone"),
+            data.get("address"),
+            data.get("city"),
+            data.get("state"),
+            data.get("zip"),
+            data.get("join_date"),
+            data.get("email2"),
+            data.get("sponsor"),
+            data.get("card_internal"),
+            data.get("card_external"),
+        ))
+        conn.commit()
+        return c.lastrowid
+    finally:
+        conn.close()
 
 
 # ------------------ Dues Functions ------------------ #

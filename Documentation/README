@@ -1,0 +1,51 @@
+readme_text = """# Project Overview
+
+This project is a membership management system with dues tracking, reporting, and settings management.
+
+## Files and Their Purpose
+
+### main.py
+- Entry point for the application.
+- Launches the GUI (`gui.py`).
+
+### gui.py
+- Main application window and navigation hub.
+- Provides access to member form, reporting, settings, and CSV utilities.
+
+### database.py
+- Handles all database operations (SQLite).
+- Manages tables for members, dues, and settings.
+- Provides reporting queries (Paid, Outstanding, All Dues).
+
+### member_form.py
+- Form for viewing and editing individual member details.
+- Includes dues history tab for each member.
+- Supports add/edit/delete dues payments.
+
+### reporting_window.py
+- Displays dues reports (Paid, Outstanding, All).
+- Double-click on a member opens their dues history in `member_form.py`.
+- Includes CSV export and printing.
+
+### settings_window.py
+- Manage application settings (dues amounts, default year).
+- Saves settings into the database.
+
+### csv_utils.py
+- Provides helper functions for CSV import/export of member data.
+- Used when exporting member lists or importing bulk members.
+
+## Dependencies
+- Tkinter: GUI framework
+- SQLite3: database backend
+- ReportLab: (for generating PDF documentation)
+- Standard Python libraries: os, csv, datetime, etc.
+
+"""
+
+# Save README.md
+readme_path = "/mnt/data/README.md"
+with open(readme_path, "w", encoding="utf-8") as f:
+    f.write(readme_text)
+
+readme_path

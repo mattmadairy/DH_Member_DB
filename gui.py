@@ -192,8 +192,6 @@ class MemberApp:
             tree.bind("<Double-1>", self._on_tree_double_click)
             tree.bind("<Button-3>", self._on_right_click_main)
             tree.bind("<Button-2>", self._on_right_click_main)
-            tree.bind("<Control-Button-1>", self._on_right_click_main)
-            tree.bind("<Button-1>", self._on_tree_click, add="+")
 
 
             self.trees[mtype] = tree
@@ -533,7 +531,6 @@ class MemberApp:
 
         tree.bind("<Button-3>", on_recycle_right_click)
         tree.bind("<Button-2>", on_recycle_right_click)
-        tree.bind("<Control-Button-1>", on_recycle_right_click)
 
         def on_close():
             self.recycle_bin_refresh_fn = None
@@ -684,4 +681,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = MemberApp(root)
     root.mainloop()
-
