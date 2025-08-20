@@ -114,8 +114,9 @@ class ReportingWindow(tk.Toplevel):
         self.tree.bind("<Double-1>", self.on_row_double_click)
 
         self._sort_state = {}
-        self.populate_report("paid")
-
+        #self.populate_report("paid")
+        self.clear_tree()
+        
     # ---------- Data helpers ----------
     def _selected_types(self):
         return [t for t, var in self.type_vars.items() if var.get()]
