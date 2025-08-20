@@ -4,6 +4,7 @@ from datetime import datetime
 import tempfile, os, platform, subprocess, csv
 
 import database
+import member_form  # ✅ for opening the MemberForm
 
 
 class ReportingWindow(tk.Toplevel):
@@ -11,6 +12,7 @@ class ReportingWindow(tk.Toplevel):
         super().__init__(parent)
         self.title("Dues Report")
         self.geometry("900x560")
+        self.report_mode = "paid"   # default mode
 
         # --- Bind keyboard shortcuts ---
         self.bind_all("<Control-p>", lambda e: self.print_report())   # Windows/Linux
@@ -29,10 +31,13 @@ class ReportingWindow(tk.Toplevel):
             top, from_=2000, to=2100, textvariable=self.year_var, width=6
         ).pack(side=tk.LEFT)
 
-        tk.Button(top, text="Run Paid Report", command=lambda: self.populate_report(False)).pack(
+        tk.Button(top, text="Run All Dues Report", command=lambda: self.populate_report("all")).pack(
             side=tk.LEFT, padx=10
         )
-        tk.Button(top, text="Run Outstanding Report", command=lambda: self.populate_report(True)).pack(
+        tk.Button(top, text="Run Paid Report", command=lambda: self.populate_report("paid")).pack(
+            side=tk.LEFT, padx=2
+        )
+        tk.Button(top, text="Run Outstanding Report", command=lambda: self.populate_report("outstanding")).pack(
             side=tk.LEFT, padx=2
         )
         tk.Button(top, text="Print Report", command=self.print_report).pack(
@@ -104,8 +109,11 @@ class ReportingWindow(tk.Toplevel):
         table_frame.rowconfigure(0, weight=1)
         table_frame.columnconfigure(0, weight=1)
 
+        # ✅ Double-click a row to open Member Form on Dues tab
+        self.tree.bind("<Double-1>", self.on_row_double_click)
+
         self._sort_state = {}
-        self.populate_report(False)
+        self.populate_report("paid")
 
     # ---------- Data helpers ----------
     def _selected_types(self):
@@ -115,7 +123,8 @@ class ReportingWindow(tk.Toplevel):
         for iid in self.tree.get_children():
             self.tree.delete(iid)
 
-    def populate_report(self, outstanding_only: bool):
+    def populate_report(self, mode="paid"):
+        self.report_mode = mode
         year = str(self.year_var.get()).strip()
         selected = self._selected_types()
         if not selected:
@@ -123,20 +132,22 @@ class ReportingWindow(tk.Toplevel):
             return
 
         try:
-            if outstanding_only:
+            if mode == "outstanding":
                 rows = database.get_outstanding_dues(year, selected)
-            else:
+            elif mode == "all":
+                rows = database.get_all_dues(year, selected)
+            else:  # paid
                 rows = database.get_payments_by_year(year, selected)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to fetch report: {e}")
             return
 
         self.clear_tree()
+
         for first, last, mtype, paid, expected, outstanding, badge, last_payment in rows:
             name = f"{last}, {first}"
             paid_f = float(paid or 0)
 
-            # Start with DB values
             expected_f = float(expected or 0)
             outstanding_f = float(outstanding) if outstanding is not None else (expected_f - paid_f)
 
@@ -150,9 +161,9 @@ class ReportingWindow(tk.Toplevel):
                     expected_f = 0.0
                     outstanding_f = 0.0
 
-            paid_s = f"${paid_f:,.2f}" if paid_f else "$0.00"
-            expected_s = f"${expected_f:,.2f}" if expected_f else "$0.00"
-            outstanding_s = f"${outstanding_f:,.2f}" if outstanding_f else "$0.00"
+            paid_s = f"${paid_f:,.2f}"
+            expected_s = f"${expected_f:,.2f}"
+            outstanding_s = f"${outstanding_f:,.2f}"
             last_payment_s = last_payment if last_payment else ""
 
             self.tree.insert(
@@ -160,6 +171,47 @@ class ReportingWindow(tk.Toplevel):
                 tk.END,
                 values=(badge or "", name, mtype, paid_s, expected_s, outstanding_s, last_payment_s)
             )
+
+    # ---------- Open Member Form from double-click ----------
+    def _member_id_by_badge(self, badge_text):
+        try:
+            conn = database.get_connection()
+            c = conn.cursor()
+            c.execute("SELECT id FROM members WHERE badge_number=? AND deleted=0 LIMIT 1", (str(badge_text),))
+            row = c.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def _on_member_dues_changed(self):
+        # ✅ refresh the current report after add/edit/delete in MemberForm
+        self.populate_report(self.report_mode)
+
+    def on_row_double_click(self, event):
+        item = self.tree.focus()
+        if not item:
+            return
+        vals = self.tree.item(item, "values")
+        if not vals:
+            return
+        badge = vals[0]  # first column is Badge #
+        if not badge:
+            messagebox.showwarning("Open Member", "No badge number on the selected row.")
+            return
+        member_id = self._member_id_by_badge(badge)
+        if not member_id:
+            messagebox.showerror("Open Member", f"No member found with badge '{badge}'.")
+            return
+
+        # ✅ Open MemberForm on the Dues tab and wire callback to auto-refresh report
+        member_form.MemberForm(
+            self,
+            member_id=member_id,
+            on_save_callback=None,              # leave existing save callback untouched
+            open_tab="dues",                    # open directly on Dues History
+            on_dues_changed=self._on_member_dues_changed  # refresh report after changes
+        )
 
     # ---------- Sorting ----------
     def sort_by(self, col_id):
@@ -200,6 +252,13 @@ class ReportingWindow(tk.Toplevel):
             messagebox.showwarning("Print", "No report data to print.")
             return
 
+        if self.report_mode == "all":
+            title = "All Dues Report"
+        elif self.report_mode == "outstanding":
+            title = "Outstanding Dues Report"
+        else:
+            title = "Paid Dues Report"
+
         headings = [self.tree.heading(col)["text"] for col in self.tree["columns"]]
         rows = [headings]
         for item in items:
@@ -211,7 +270,7 @@ class ReportingWindow(tk.Toplevel):
         width_sum = sum(col_widths) + 3 * (len(col_widths) - 1)
 
         lines = [
-            "Dues Report".center(width_sum),
+            title.center(width_sum),
             f"Year: {self.year_var.get()}".center(width_sum),
             f"Generated: {timestamp}".center(width_sum),
             ""
@@ -272,7 +331,16 @@ class ReportingWindow(tk.Toplevel):
             messagebox.showwarning("Export", "No report data to export.")
             return
 
+        year = self.year_var.get()
+        if self.report_mode == "all":
+            default_name = f"all_dues_{year}.csv"
+        elif self.report_mode == "outstanding":
+            default_name = f"outstanding_dues_{year}.csv"
+        else:
+            default_name = f"paid_dues_{year}.csv"
+
         file_path = filedialog.asksaveasfilename(
+            initialfile=default_name,
             defaultextension=".csv",
             filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
         )
@@ -284,7 +352,6 @@ class ReportingWindow(tk.Toplevel):
                 writer = csv.writer(f)
                 writer.writerow([self.tree.heading(col)["text"] for col in self.tree["columns"]])
                 for item in items:
-                    # row values already reflect Life dues override
                     writer.writerow(self.tree.item(item, "values"))
             messagebox.showinfo("Export", f"Report exported successfully:\n{file_path}")
         except Exception as e:

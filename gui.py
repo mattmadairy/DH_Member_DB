@@ -50,7 +50,7 @@ class MemberApp:
         reports_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Reports", menu=reports_menu)
         reports_menu.add_command(
-            label="Dues Report",
+            label="Dues",
             command=lambda: reporting_window.ReportingWindow(self.root)
         )
         # Recycle Bin

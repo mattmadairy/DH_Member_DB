@@ -4,29 +4,30 @@ import database
 from datetime import datetime
 
 class MemberForm:
-    def __init__(self, parent, member_id=None, on_save_callback=None):
+    def __init__(self, parent, member_id=None, on_save_callback=None, open_tab=None, on_dues_changed=None):
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
         self.member_id = member_id
-        self.on_save_callback = on_save_callback  # ✅ callback for GUI updates
+        self.on_save_callback = on_save_callback  # existing callback (unchanged)
+        self.on_dues_changed = on_dues_changed    # ✅ new: notify parent when dues change
 
         # ✅ Bind Enter/Return to save member (when not editing dues)
         self.top.bind("<Return>", lambda event: self.save_member())
 
         # Notebook (tabs)
-        notebook = ttk.Notebook(self.top)
-        notebook.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.notebook = ttk.Notebook(self.top)
+        self.notebook.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
         # Frames for each tab
-        self.tab_basic = ttk.Frame(notebook)
-        self.tab_contact = ttk.Frame(notebook)
-        self.tab_membership = ttk.Frame(notebook)
-        self.tab_dues = ttk.Frame(notebook)
+        self.tab_basic = ttk.Frame(self.notebook)
+        self.tab_contact = ttk.Frame(self.notebook)
+        self.tab_membership = ttk.Frame(self.notebook)
+        self.tab_dues = ttk.Frame(self.notebook)
 
-        notebook.add(self.tab_basic, text="Basic Info")
-        notebook.add(self.tab_contact, text="Contact")
-        notebook.add(self.tab_membership, text="Membership")
-        notebook.add(self.tab_dues, text="Dues History")
+        self.notebook.add(self.tab_basic, text="Basic Info")
+        self.notebook.add(self.tab_contact, text="Contact")
+        self.notebook.add(self.tab_membership, text="Membership")
+        self.notebook.add(self.tab_dues, text="Dues History")
 
         # Form variables
         self.badge_number_var = tk.StringVar()
@@ -104,7 +105,7 @@ class MemberForm:
         self.dues_tree.heading("method", text="Method")
         self.dues_tree.heading("notes", text="Notes")
 
-        # ✅ Adjust column widths
+        # Column widths
         self.dues_tree.column("year", width=60, anchor="center")
         self.dues_tree.column("amount", width=80, anchor="w")
         self.dues_tree.column("date", width=100, anchor="w")
@@ -113,7 +114,7 @@ class MemberForm:
 
         self.dues_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
 
-        # ✅ Double-click or Enter to edit
+        # Double-click or Enter to edit
         self.dues_tree.bind("<Double-1>", self.on_payment_double_click)
         self.dues_tree.bind("<Return>", self.on_payment_enter)
 
@@ -157,6 +158,10 @@ class MemberForm:
         if self.member_id:
             self.load_member()
             self.load_dues_history()
+
+        # ✅ Open directly on the requested tab
+        if open_tab == "dues":
+            self.notebook.select(self.tab_dues)
 
     # --- Load member info ---
     def load_member(self):
@@ -209,7 +214,7 @@ class MemberForm:
             member_name = f"{self.first_name_var.get()} {self.last_name_var.get()}"
             messagebox.showinfo("Success", f"Member '{member_name}' saved successfully!")
 
-            # ✅ Call GUI callback with id + type
+            # existing callback retained
             if self.on_save_callback:
                 self.on_save_callback(self.member_id, self.membership_type_var.get())
 
@@ -250,6 +255,11 @@ class MemberForm:
             self.load_dues_history()
             self.dues_amount_var.set("")
             self.dues_notes_var.set("")
+
+            # ✅ notify parent window to refresh report
+            if self.on_dues_changed:
+                self.on_dues_changed()
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add payment: {e}")
 
@@ -300,6 +310,11 @@ class MemberForm:
                 )
                 self.load_dues_history()
                 popup.destroy()
+
+                # ✅ notify parent window to refresh report
+                if self.on_dues_changed:
+                    self.on_dues_changed()
+
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to update payment: {e}")
 
@@ -342,5 +357,10 @@ class MemberForm:
             try:
                 database.delete_dues_payment(dues_id)
                 self.load_dues_history()
+
+                # ✅ notify parent window to refresh report
+                if self.on_dues_changed:
+                    self.on_dues_changed()
+
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to delete payment: {e}")
