@@ -9,10 +9,9 @@ class MemberForm:
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
         self.member_id = member_id
-        self.on_save_callback = on_save_callback  # existing callback (unchanged)
-        self.on_dues_changed = on_dues_changed    # ✅ new: notify parent when dues change
+        self.on_save_callback = on_save_callback
+        self.on_dues_changed = on_dues_changed
 
-        # ✅ Bind Enter/Return to save member (when not editing dues)
         self.top.bind("<Return>", lambda event: self.save_member())
 
         # Notebook (tabs)
@@ -24,11 +23,13 @@ class MemberForm:
         self.tab_contact = ttk.Frame(self.notebook)
         self.tab_membership = ttk.Frame(self.notebook)
         self.tab_dues = ttk.Frame(self.notebook)
+        self.tab_work_hours = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_basic, text="Basic Info")
         self.notebook.add(self.tab_contact, text="Contact")
         self.notebook.add(self.tab_membership, text="Membership")
         self.notebook.add(self.tab_dues, text="Dues History")
+        self.notebook.add(self.tab_work_hours, text="Work Hours")
 
         # Form variables
         self.badge_number_var = tk.StringVar()
@@ -48,7 +49,6 @@ class MemberForm:
         self.card_internal_var = tk.StringVar()
         self.card_external_var = tk.StringVar()
 
-        # Membership type options
         self.membership_types = [
             "Probationary", "Associate", "Active",
             "Life", "Prospective", "Wait List", "Former"
@@ -80,7 +80,7 @@ class MemberForm:
             ("Card/Fob External Number", self.card_external_var),
         ]
 
-        # Helper to build labeled fields
+        # --- Build fields per tab ---
         def build_fields(frame, fields):
             for idx, (label, var) in enumerate(fields):
                 ttk.Label(frame, text=label).grid(row=idx, column=0, sticky="e", padx=5, pady=2)
@@ -94,77 +94,100 @@ class MemberForm:
         build_fields(self.tab_contact, fields_contact)
         build_fields(self.tab_membership, fields_membership)
 
+        # --- Add Save buttons per tab ---
+        ttk.Button(self.tab_basic, text="Save", command=self.save_basic_info).grid(row=5, column=0, pady=5)
+        ttk.Button(self.tab_contact, text="Save", command=self.save_contact).grid(row=10, column=0, pady=5)
+        ttk.Button(self.tab_membership, text="Save", command=self.save_membership_info).grid(row=10, column=0, pady=5)
+
         # --- Dues History Tab ---
         self.dues_tree = ttk.Treeview(
             self.tab_dues,
             columns=("year", "amount", "date", "method", "notes"),
             show="headings"
         )
-        self.dues_tree.heading("year", text="Year")
-        self.dues_tree.heading("amount", text="Amount")
-        self.dues_tree.heading("date", text="Date")
-        self.dues_tree.heading("method", text="Method")
-        self.dues_tree.heading("notes", text="Notes")
-
-        # Column widths
-        self.dues_tree.column("year", width=60, anchor="center")
-        self.dues_tree.column("amount", width=80, anchor="w")
-        self.dues_tree.column("date", width=100, anchor="w")
-        self.dues_tree.column("method", width=90, anchor="w")
-        self.dues_tree.column("notes", width=200, anchor="w")
+        for col, width in [("year",60),("amount",80),("date",100),("method",90),("notes",200)]:
+            self.dues_tree.heading(col, text=col.title())
+            self.dues_tree.column(col, width=width, anchor="w")
+        self.dues_tree.column("year", anchor="center")
 
         self.dues_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
-
-        # Double-click or Enter to edit
-        self.dues_tree.bind("<Double-1>", self.on_payment_double_click)
-        self.dues_tree.bind("<Return>", self.on_payment_enter)
 
         # Entry fields for adding new payment
         try:
             default_year = str(database.get_default_year())
         except Exception:
-            default_year = datetime.today().strftime("%Y")
+            default_year = datetime.now().strftime("%Y")
 
         self.dues_year_var = tk.StringVar(value=default_year)
         self.dues_amount_var = tk.StringVar()
-        self.dues_date_var = tk.StringVar(value=datetime.today().strftime("%Y-%m-%d"))
+        self.dues_date_var = tk.StringVar(value=datetime.today().strftime("%m/%d/%Y"))
         self.dues_method_var = tk.StringVar()
         self.dues_notes_var = tk.StringVar()
 
-        ttk.Label(self.tab_dues, text="Year").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ttk.Label(self.tab_dues, text="Year").grid(row=1, column=0, sticky="e", padx=5, pady=2)
         ttk.Entry(self.tab_dues, textvariable=self.dues_year_var, width=6).grid(row=1, column=1, padx=5, pady=2)
-
-        ttk.Label(self.tab_dues, text="Date").grid(row=1, column=2, padx=5, pady=2, sticky="e")
+        ttk.Label(self.tab_dues, text="Date").grid(row=1, column=2, sticky="e", padx=5, pady=2)
         ttk.Entry(self.tab_dues, textvariable=self.dues_date_var, width=12).grid(row=1, column=3, padx=5, pady=2)
-
-        ttk.Label(self.tab_dues, text="Amount").grid(row=2, column=0, padx=5, pady=2, sticky="e")
+        ttk.Label(self.tab_dues, text="Amount").grid(row=2, column=0, sticky="e", padx=5, pady=2)
         ttk.Entry(self.tab_dues, textvariable=self.dues_amount_var, width=10).grid(row=2, column=1, padx=5, pady=2)
-
-        ttk.Label(self.tab_dues, text="Method").grid(row=2, column=2, padx=5, pady=2, sticky="e")
+        ttk.Label(self.tab_dues, text="Method").grid(row=2, column=2, sticky="e", padx=5, pady=2)
         method_cb = ttk.Combobox(self.tab_dues, textvariable=self.dues_method_var,
                                  values=["Cash", "Check", "Electronic"], state="readonly", width=12)
         method_cb.grid(row=2, column=3, padx=5, pady=2)
-
-        ttk.Label(self.tab_dues, text="Notes").grid(row=3, column=0, padx=5, pady=2, sticky="e")
+        ttk.Label(self.tab_dues, text="Notes").grid(row=3, column=0, sticky="e", padx=5, pady=2)
         ttk.Entry(self.tab_dues, textvariable=self.dues_notes_var, width=25).grid(row=3, column=1, columnspan=3, padx=5, pady=2)
 
         ttk.Button(self.tab_dues, text="Add Payment", command=self.add_dues_payment).grid(row=4, column=0, pady=5)
         ttk.Button(self.tab_dues, text="Edit Payment", command=self.edit_dues_payment).grid(row=4, column=1, pady=5)
         ttk.Button(self.tab_dues, text="Delete Payment", command=self.delete_dues_payment).grid(row=4, column=2, pady=5)
 
-        # Save button at bottom
-        ttk.Button(self.top, text="Save Member", command=self.save_member).grid(row=1, column=0, pady=10)
+        # --- Work Hours Tab ---
+        self.wh_tree = ttk.Treeview(
+            self.tab_work_hours,
+            columns=("date","work_type","hours","notes"),
+            show="headings"
+        )
+        self.wh_tree.heading("date", text="Date")
+        self.wh_tree.heading("work_type", text="Work Type")
+        self.wh_tree.heading("hours", text="Hours")
+        self.wh_tree.heading("notes", text="Notes")
 
-        # If editing, load existing member
+        self.wh_tree.column("date", width=100, anchor="w")
+        self.wh_tree.column("hours", width=60, anchor="center")
+        self.wh_tree.column("work_type", width=100, anchor="w")
+        self.wh_tree.column("notes", width=200, anchor="w")
+
+        self.wh_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
+
+        self.wh_date_var = tk.StringVar(value=datetime.now().strftime("%m/%d/%Y"))
+        self.wh_type_var = tk.StringVar()
+        self.wh_hours_var = tk.StringVar()
+        self.wh_notes_var = tk.StringVar()
+
+        ttk.Label(self.tab_work_hours, text="Date").grid(row=1, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(self.tab_work_hours, textvariable=self.wh_date_var, width=12).grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(self.tab_work_hours, text="Work Type").grid(row=1, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(self.tab_work_hours, textvariable=self.wh_type_var, width=20).grid(row=1, column=3, padx=5, pady=2)
+        ttk.Label(self.tab_work_hours, text="Hours").grid(row=2, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(self.tab_work_hours, textvariable=self.wh_hours_var, width=6).grid(row=2, column=1, padx=5, pady=2)
+        ttk.Label(self.tab_work_hours, text="Notes").grid(row=2, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(self.tab_work_hours, textvariable=self.wh_notes_var, width=25).grid(row=2, column=3, padx=5, pady=2)
+
+        ttk.Button(self.tab_work_hours, text="Add Entry", command=self.add_work_hours).grid(row=3, column=0, pady=5)
+        ttk.Button(self.tab_work_hours, text="Edit Entry", command=self.edit_work_hours).grid(row=3, column=1, pady=5)
+        ttk.Button(self.tab_work_hours, text="Delete Entry", command=self.delete_work_hours).grid(row=3, column=2, pady=5)
+
         if self.member_id:
             self.load_member()
             self.load_dues_history()
+            self.load_work_hours()
 
-        # ✅ Open directly on the requested tab
         if open_tab == "dues":
             self.notebook.select(self.tab_dues)
+        elif open_tab == "work_hours":
+            self.notebook.select(self.tab_work_hours)
 
-    # --- Load member info ---
+    # --- Member ---
     def load_member(self):
         member = database.get_member_by_id(self.member_id)
         if member:
@@ -185,183 +208,187 @@ class MemberForm:
             self.card_internal_var.set(member[15])
             self.card_external_var.set(member[16])
 
-    # --- Save member info ---
     def save_member(self):
-        try:
-            data = (
-                self.badge_number_var.get(),
-                self.membership_type_var.get(),
-                self.first_name_var.get(),
-                self.last_name_var.get(),
-                self.dob_var.get(),
-                self.email_var.get(),
-                self.phone_var.get(),
-                self.address_var.get(),
-                self.city_var.get(),
-                self.state_var.get(),
-                self.zip_var.get(),
-                self.join_date_var.get(),
-                self.email2_var.get(),
-                self.sponsor_var.get(),
-                self.card_internal_var.get(),
-                self.card_external_var.get()
-            )
+        data = (
+            self.badge_number_var.get(),
+            self.membership_type_var.get(),
+            self.first_name_var.get(),
+            self.last_name_var.get(),
+            self.dob_var.get(),
+            self.email_var.get(),
+            self.phone_var.get(),
+            self.address_var.get(),
+            self.city_var.get(),
+            self.state_var.get(),
+            self.zip_var.get(),
+            self.join_date_var.get(),
+            self.email2_var.get(),
+            self.sponsor_var.get(),
+            self.card_internal_var.get(),
+            self.card_external_var.get()
+        )
+        if self.member_id:
+            database.update_member(self.member_id, data)
+        else:
+            self.member_id = database.add_member(data)
+        if self.on_save_callback:
+            self.on_save_callback(self.member_id, self.membership_type_var.get())
+        self.top.destroy()
 
-            if self.member_id:
-                database.update_member(self.member_id, data)
-            else:
-                self.member_id = database.add_member(data)
+    # --- Basic / Contact / Membership Save ---
+    def save_basic_info(self):
+        database.update_member_basic(self.member_id, self.first_name_var.get(),
+                                     self.last_name_var.get(), self.dob_var.get())
+    def save_contact(self):
+        database.update_member_contact(self.member_id, self.email_var.get(),
+                                       self.email2_var.get(), self.phone_var.get(),
+                                       self.address_var.get(), self.city_var.get(),
+                                       self.state_var.get(), self.zip_var.get())
+    def save_membership_info(self):
+        database.update_member_membership(self.member_id, self.badge_number_var.get(),
+                                          self.membership_type_var.get(), self.join_date_var.get(),
+                                          self.sponsor_var.get(), self.card_internal_var.get(),
+                                          self.card_external_var.get())
 
-            member_name = f"{self.first_name_var.get()} {self.last_name_var.get()}"
-            messagebox.showinfo("Success", f"Member '{member_name}' saved successfully!")
-
-            # existing callback retained
-            if self.on_save_callback:
-                self.on_save_callback(self.member_id, self.membership_type_var.get())
-
-            self.top.destroy()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save member: {e}")
-
-    # --- Load dues history ---
+    # --- Dues Tab ---
     def load_dues_history(self):
         if not self.member_id:
             return
         for row in self.dues_tree.get_children():
             self.dues_tree.delete(row)
-        dues_records = database.get_dues_by_member(self.member_id)
-        for record in dues_records:
-            # record = (id, member_id, amount, payment_date, year, method, notes)
-            amount = f"{float(record[2]):.2f}" if record[2] not in (None, "") else ""
-            payment_date = record[3]
-            year = record[4]
-            method = record[5]
-            notes = record[6] if len(record) > 6 else ""
-            self.dues_tree.insert("", "end", iid=record[0], values=(year, amount, payment_date, method, notes))
+        records = database.get_dues_by_member(self.member_id)
+        for record in records:
+            self.dues_tree.insert("", "end", iid=record[0], values=(
+                record[4],  # year
+                f"{record[2]:.2f}",  # amount
+                record[3],  # date
+                record[5] or "",  # method
+                record[6] or ""   # notes
+            ))
 
-    # --- Add new payment ---
     def add_dues_payment(self):
         if not self.member_id:
             messagebox.showerror("Error", "Save member first before adding dues.")
             return
         try:
             amount = float(self.dues_amount_var.get())
-            date = self.dues_date_var.get()
-            year = self.dues_year_var.get()
-            method = self.dues_method_var.get()
-            notes = self.dues_notes_var.get()
-
-            database.add_dues_payment(self.member_id, amount, date, method, notes, year)
-            self.load_dues_history()
-            self.dues_amount_var.set("")
-            self.dues_notes_var.set("")
-
-            # ✅ notify parent window to refresh report
-            if self.on_dues_changed:
-                self.on_dues_changed()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to add payment: {e}")
-
-    # --- Popup to edit selected payment ---
-    def open_edit_payment_popup(self, dues_id):
-        record = database.get_dues_payment_by_id(dues_id)
-        if not record:
-            messagebox.showerror("Error", "Payment record not found.")
+        except ValueError:
+            messagebox.showerror("Invalid Amount", "Amount must be numeric.")
             return
 
-        popup = tk.Toplevel(self.top)
-        popup.title("Edit Payment")
-        popup.grab_set()  # modal
+        database.add_dues_payment(self.member_id, amount, self.dues_date_var.get(),
+                                  self.dues_method_var.get() or None, self.dues_notes_var.get() or None,
+                                  self.dues_year_var.get())
+        self.load_dues_history()
+        self.dues_amount_var.set("")
+        self.dues_notes_var.set("")
 
-        amount_var = tk.StringVar(value=f"{float(record[2]):.2f}")
-
-        date_var = tk.StringVar(value=record[3])
-        year_var = tk.StringVar(value=record[4])
-        method_var = tk.StringVar(value=record[5])
-        notes_var = tk.StringVar(value=record[6] if len(record) > 6 else "")
-
-        ttk.Label(popup, text="Year").grid(row=0, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=year_var, width=6).grid(row=0, column=1, padx=5, pady=2)
-
-        ttk.Label(popup, text="Date").grid(row=1, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=date_var).grid(row=1, column=1, padx=5, pady=2)
-
-        ttk.Label(popup, text="Amount").grid(row=2, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=amount_var).grid(row=2, column=1, padx=5, pady=2)
-
-        ttk.Label(popup, text="Method").grid(row=3, column=0, padx=5, pady=2, sticky="e")
-        method_cb = ttk.Combobox(popup, textvariable=method_var,
-                                 values=["Cash", "Check", "Electronic"], state="readonly")
-        method_cb.grid(row=3, column=1, padx=5, pady=2)
-
-        ttk.Label(popup, text="Notes").grid(row=4, column=0, padx=5, pady=2, sticky="e")
-        ttk.Entry(popup, textvariable=notes_var).grid(row=4, column=1, padx=5, pady=2)
-
-        def save_changes(event=None):
-            try:
-                database.update_dues_payment(
-                    dues_id,
-                    float(amount_var.get()),
-                    date_var.get(),
-                    method_var.get(),
-                    notes_var.get(),
-                    year_var.get()
-                )
-                self.load_dues_history()
-                popup.destroy()
-
-                # ✅ notify parent window to refresh report
-                if self.on_dues_changed:
-                    self.on_dues_changed()
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to update payment: {e}")
-
-        ttk.Button(popup, text="Save", command=save_changes).grid(row=5, column=0, columnspan=2, pady=5)
-        popup.bind("<Return>", save_changes)
-
-    # --- Edit selected payment (button) ---
     def edit_dues_payment(self):
         selected = self.dues_tree.selection()
         if not selected:
-            messagebox.showwarning("Warning", "Select a payment to edit.")
             return
-        dues_id = int(selected[0])
-        self.open_edit_payment_popup(dues_id)
-
-    # --- Double-click on row ---
-    def on_payment_double_click(self, event):
-        selected = self.dues_tree.selection()
-        if not selected:
+        payment_id = int(selected[0])
+        record = database.get_dues_by_id(payment_id)
+        if not record:
             return
-        dues_id = int(selected[0])
-        self.open_edit_payment_popup(dues_id)
+        popup = tk.Toplevel(self.top)
+        popup.title("Edit Payment")
+        popup.grab_set()
+        year_var = tk.StringVar(value=record[4])
+        amount_var = tk.StringVar(value=str(record[2]))
+        date_var = tk.StringVar(value=record[3])
+        method_var = tk.StringVar(value=record[5] or "")
+        notes_var = tk.StringVar(value=record[6] or "")
+        ttk.Label(popup, text="Year").grid(row=0, column=0)
+        ttk.Entry(popup, textvariable=year_var, width=6).grid(row=0, column=1)
+        ttk.Label(popup, text="Amount").grid(row=1, column=0)
+        ttk.Entry(popup, textvariable=amount_var, width=10).grid(row=1, column=1)
+        ttk.Label(popup, text="Date").grid(row=2, column=0)
+        ttk.Entry(popup, textvariable=date_var, width=12).grid(row=2, column=1)
+        ttk.Label(popup, text="Method").grid(row=3, column=0)
+        ttk.Entry(popup, textvariable=method_var, width=12).grid(row=3, column=1)
+        ttk.Label(popup, text="Notes").grid(row=4, column=0)
+        ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=4, column=1)
+        def save_changes():
+            database.update_dues_payment(payment_id, float(amount_var.get()), date_var.get(),
+                                         method_var.get() or None, notes_var.get() or None,
+                                         year_var.get())
+            popup.destroy()
+            self.load_dues_history()
+        ttk.Button(popup, text="Save", command=save_changes).grid(row=5, column=0, columnspan=2)
+        popup.bind("<Return>", lambda e: save_changes())
 
-    # --- Enter key on row ---
-    def on_payment_enter(self, event):
-        selected = self.dues_tree.selection()
-        if not selected:
-            return
-        dues_id = int(selected[0])
-        self.open_edit_payment_popup(dues_id)
-
-    # --- Delete selected payment ---
     def delete_dues_payment(self):
         selected = self.dues_tree.selection()
         if not selected:
-            messagebox.showwarning("Warning", "Select a payment to delete.")
             return
-        dues_id = int(selected[0])
-        if messagebox.askyesno("Confirm", "Are you sure you want to delete this payment?"):
-            try:
-                database.delete_dues_payment(dues_id)
-                self.load_dues_history()
+        payment_id = int(selected[0])
+        if messagebox.askyesno("Confirm", "Delete selected payment?"):
+            database.delete_dues_payment(payment_id)
+            self.load_dues_history()
 
-                # ✅ notify parent window to refresh report
-                if self.on_dues_changed:
-                    self.on_dues_changed()
+    # --- Work Hours Tab ---
+    def load_work_hours(self):
+        if not self.member_id:
+            return
+        for row in self.wh_tree.get_children():
+            self.wh_tree.delete(row)
+        records = database.get_work_hours_by_member(self.member_id)
+        for record in records:
+            self.wh_tree.insert("", "end", iid=record[0], values=(
+                record[2],        # Date
+                record[4] or "",  # Work Type
+                record[3],        # Hours
+                record[5] or ""   # Notes
+            ))
 
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to delete payment: {e}")
+    def add_work_hours(self):
+        if not self.member_id:
+            return
+        database.add_work_hours(self.member_id, self.wh_date_var.get(),
+                                float(self.wh_hours_var.get()), self.wh_type_var.get() or None,
+                                self.wh_notes_var.get() or None)
+        self.load_work_hours()
+        self.wh_hours_var.set("")
+        self.wh_type_var.set("")
+        self.wh_notes_var.set("")
+
+    def edit_work_hours(self):
+        selected = self.wh_tree.selection()
+        if not selected:
+            return
+        wh_id = int(selected[0])
+        record = database.get_work_hours_by_id(wh_id)
+        if not record:
+            return
+        popup = tk.Toplevel(self.top)
+        popup.title("Edit Work Hours")
+        popup.grab_set()
+        date_var = tk.StringVar(value=record[2])
+        type_var = tk.StringVar(value=record[4] or "")
+        hours_var = tk.StringVar(value=str(record[3]))
+        notes_var = tk.StringVar(value=record[5] or "")
+        ttk.Label(popup, text="Date").grid(row=0, column=0)
+        ttk.Entry(popup, textvariable=date_var, width=12).grid(row=0, column=1)
+        ttk.Label(popup, text="Work Type").grid(row=1, column=0)
+        ttk.Entry(popup, textvariable=type_var, width=20).grid(row=1, column=1)
+        ttk.Label(popup, text="Hours").grid(row=2, column=0)
+        ttk.Entry(popup, textvariable=hours_var, width=6).grid(row=2, column=1)
+        ttk.Label(popup, text="Notes").grid(row=3, column=0)
+        ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=3, column=1)
+        def save_changes():
+            database.update_work_hours(wh_id, date_var.get(), float(hours_var.get()),
+                                       type_var.get() or None, notes_var.get() or None)
+            popup.destroy()
+            self.load_work_hours()
+        ttk.Button(popup, text="Save", command=save_changes).grid(row=4, column=0, columnspan=2)
+        popup.bind("<Return>", lambda e: save_changes())
+
+    def delete_work_hours(self):
+        selected = self.wh_tree.selection()
+        if not selected:
+            return
+        wh_id = int(selected[0])
+        if messagebox.askyesno("Confirm", "Delete selected work hour entry?"):
+            database.delete_work_hours(wh_id)
+            self.load_work_hours()

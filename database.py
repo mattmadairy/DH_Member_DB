@@ -1,7 +1,12 @@
+# database.py
+# Database management for members, dues, and work hours
+# This module handles SQLite database operations for a membership management system.
+# It includes functions for initializing the database, managing members and dues,
+
 import sqlite3 
 import os
 import shutil
-import datetime
+from datetime import datetime
 
 DB_NAME = "members.db"
 
@@ -53,6 +58,7 @@ def init_db():
             FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
         )
     """)
+   
 
     # Settings table (dues amounts & default year)
     c.execute("""
@@ -72,6 +78,9 @@ def init_db():
     }
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+
+     # At the end of init_db()
+    init_work_hours_table()
 
     conn.commit()
     conn.close()
@@ -105,7 +114,7 @@ def migrate_all():
     conn = get_connection()
     c = conn.cursor()
 
-    # Members migration
+    # ---------------- Members Migration ----------------
     c.execute("PRAGMA table_info(members)")
     existing_cols = [col[1] for col in c.fetchall()]
     required_members = [
@@ -139,7 +148,7 @@ def migrate_all():
             )
         """, required_members)
 
-    # Dues migration
+    # ---------------- Dues Migration ----------------
     c.execute("PRAGMA table_info(dues)")
     existing_cols = [col[1] for col in c.fetchall()]
     required_dues = ["id", "member_id", "amount", "payment_date", "year", "method", "notes"]
@@ -159,7 +168,7 @@ def migrate_all():
             )
         """, required_dues)
 
-    # Settings table (ensure exists + defaults)
+    # ---------------- Settings Table ----------------
     c.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -171,13 +180,33 @@ def migrate_all():
         "dues_associate": "300",
         "dues_active": "150",
         "dues_life": "0",
-        "default_year": str(datetime.datetime.now().year),
+        "default_year": str(datetime.now().year),
     }
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
+    # ---------------- Work Hours Migration ----------------
+    c.execute("PRAGMA table_info(work_hours)")
+    existing_cols = [col[1] for col in c.fetchall()]
+    required_work_hours = ["id", "member_id", "date", "hours", "work_type", "notes"]
+
+    if not existing_cols:
+        print("⚠️ Creating work_hours table")
+        c.execute("""
+            CREATE TABLE work_hours (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                member_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                hours REAL NOT NULL,
+                work_type TEXT,
+                notes TEXT,
+                FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+            )
+        """)
+
     conn.commit()
     conn.close()
+
 
 
 # ------------------ Settings Helpers ------------------ #
@@ -209,7 +238,8 @@ def get_all_settings():
 
 def get_default_year():
     settings = get_all_settings()
-    return int(settings.get("default_year", datetime.datetime.now().year))
+    return int(settings.get("default_year", datetime.now().year))
+
 
 
 def get_expected_dues(membership_type):
@@ -270,6 +300,7 @@ def soft_delete_member_by_id(member_id):
     conn.commit()
     conn.close()
 
+
 def permanent_delete_member(member_id):
     """
     Permanently delete a member from the database.
@@ -282,7 +313,6 @@ def permanent_delete_member(member_id):
         conn.commit()
     finally:
         conn.close()
-
 
 
 def restore_member(member_id):
@@ -318,6 +348,7 @@ def get_deleted_members():
     rows = c.fetchall()
     conn.close()
     return rows
+
 
 def insert_member_from_dict(data: dict):
     """
@@ -357,6 +388,103 @@ def insert_member_from_dict(data: dict):
         conn.close()
 
 
+# ------------------ Deleted Members Functions ------------------ #
+def ensure_deleted_members_table():
+    conn = get_connection()
+    c = conn.cursor()
+    # Check if table exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='deleted_members'")
+    if not c.fetchone():
+        # Create table
+        c.execute("""
+            CREATE TABLE deleted_members (
+                id INTEGER PRIMARY KEY,
+                badge_number TEXT,
+                membership_type TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                dob TEXT,
+                email TEXT,
+                phone TEXT,
+                address TEXT,
+                city TEXT,
+                state TEXT,
+                zip TEXT,
+                join_date TEXT,
+                email2 TEXT,
+                sponsor TEXT,
+                card_internal TEXT,
+                card_external TEXT,
+                deleted_at TEXT
+            )
+        """)
+    else:
+        # Ensure 'deleted_at' column exists
+        c.execute("PRAGMA table_info(deleted_members)")
+        columns = [row[1] for row in c.fetchall()]
+        if 'deleted_at' not in columns:
+            c.execute("ALTER TABLE deleted_members ADD COLUMN deleted_at TEXT")
+    conn.commit()
+    conn.close()
+
+
+def insert_deleted_member(member_data, deleted_at):
+    """
+    Insert a member into the deleted_members table with the current columns dynamically.
+    member_data: tuple from get_member_by_id (full member row)
+    deleted_at: timestamp string
+    """
+    import sqlite3
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    # 1️⃣ Get column names of deleted_members table
+    c.execute("PRAGMA table_info(deleted_members)")
+    columns = [col[1] for col in c.fetchall()]  # col[1] = name
+
+    # 2️⃣ Exclude auto-increment ID if present and not in member_data
+    if "ID" in columns:
+        columns.remove("ID")
+
+    # 3️⃣ Prepare values in the same order as columns
+    values = []
+    for col in columns:
+        if col == "Deleted_At":
+            values.append(deleted_at)
+        else:
+            # map by position from member_data assuming order matches members table
+            idx = columns.index(col)
+            # fallback if member_data has fewer items
+            values.append(member_data[idx] if idx < len(member_data) else None)
+
+    # 4️⃣ Build placeholders dynamically
+    placeholders = ",".join("?" for _ in columns)
+    col_names = ",".join(columns)
+    c.execute(f"INSERT INTO deleted_members ({col_names}) VALUES ({placeholders})", values)
+
+    conn.commit()
+    conn.close()
+
+def archive_member(member_data):
+    """Insert a member into deleted_members safely, dynamically handling columns."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    # Get deleted_members column names
+    c.execute("PRAGMA table_info(deleted_members)")
+    cols = [col[1] for col in c.fetchall()]  # list of column names
+
+    # We assume the last column is 'deleted_at'
+    values = list(member_data[:len(cols)-1])  # trim/extract only matching columns
+    values.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))  # deleted_at
+
+    placeholders = ",".join("?" for _ in values)
+    c.execute(f"INSERT INTO deleted_members ({','.join(cols)}) VALUES ({placeholders})", values)
+    conn.commit()
+    conn.close()
+
+
+
 # ------------------ Dues Functions ------------------ #
 def add_dues_payment(member_id, amount, payment_date, method, notes, year=None):
     if not year:
@@ -384,6 +512,22 @@ def get_dues_by_member(member_id):
     conn.close()
     return rows
 
+def get_dues_by_id(payment_id):
+    """
+    Retrieve a single dues payment by its ID.
+    Returns a tuple: (id, member_id, amount, date, year, method, notes)
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, member_id, amount, date, year, method, notes
+        FROM dues
+        WHERE id=? 
+        LIMIT 1
+    """, (payment_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
 
 def get_dues_payment_by_id(dues_id):
     conn = get_connection()
@@ -398,24 +542,29 @@ def get_dues_payment_by_id(dues_id):
     return row
 
 
-def update_dues_payment(dues_id, amount, payment_date, method, notes, year=None):
-    if not year:
-        year = get_default_year()
+def update_dues_payment(payment_id, amount, date, method, notes, year):
+    """
+    Update an existing dues payment with new data.
+    """
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
         UPDATE dues
-        SET amount=?, payment_date=?, year=?, method=?, notes=?
+        SET amount=?, date=?, method=?, notes=?, year=?
         WHERE id=?
-    """, (amount, payment_date, str(year), method, notes, dues_id))
+    """, (amount, date, method, notes, year, payment_id))
     conn.commit()
     conn.close()
 
 
-def delete_dues_payment(dues_id):
+
+def delete_dues_payment(payment_id):
+    """
+    Delete a dues payment by its ID.
+    """
     conn = get_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM dues WHERE id=?", (dues_id,))
+    c.execute("DELETE FROM dues WHERE id=?", (payment_id,))
     conn.commit()
     conn.close()
 
@@ -520,3 +669,206 @@ def get_all_dues(year, included_types):
     rows = c.fetchall()
     conn.close()
     return rows
+
+# ------------------ Work Hours Functions ----------------- #
+def init_work_hours_table():
+    """Ensure the work_hours table exists with correct schema."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS work_hours (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            hours REAL NOT NULL,
+            work_type TEXT,
+            notes TEXT,
+            FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def add_work_hours(member_id, date, hours, work_type=None, notes=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO work_hours (member_id, date, hours, work_type, notes)
+        VALUES (?, ?, ?, ?, ?)
+    """, (member_id, date, hours, work_type, notes))
+    conn.commit()
+    conn.close()
+
+def get_work_hours(member_id=None):
+    conn = get_connection()
+    c = conn.cursor()
+    if member_id:
+        c.execute("SELECT id, member_id, date, hours, work_type, notes FROM work_hours WHERE member_id = ? ORDER BY date DESC", (member_id,))
+    else:
+        c.execute("SELECT id, member_id, date, hours, work_type, notes FROM work_hours ORDER BY date DESC")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_work_hours_by_id(entry_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, member_id, date, hours, work_type, notes FROM work_hours WHERE id=?", (entry_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_work_hours(entry_id, date, hours, work_type, notes):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        UPDATE work_hours
+        SET date=?, hours=?, work_type=?, notes=?
+        WHERE id=?
+    """, (date, hours, work_type, notes, entry_id))
+    conn.commit()
+    conn.close()
+
+def delete_work_hours(entry_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM work_hours WHERE id=?", (entry_id,))
+    conn.commit()
+    conn.close()
+
+# ------------------ Work Hours Functions ----------------- #
+def init_work_hours_table():
+    """Ensure the work_hours table exists with correct schema."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS work_hours (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            hours REAL NOT NULL,
+            work_type TEXT,
+            notes TEXT,
+            FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def add_work_hours(member_id, date, hours, work_type=None, notes=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO work_hours (member_id, date, hours, work_type, notes)
+        VALUES (?, ?, ?, ?, ?)
+    """, (member_id, date, hours, work_type, notes))
+    conn.commit()
+    conn.close()
+
+def get_work_hours(member_id=None):
+    conn = get_connection()
+    c = conn.cursor()
+    if member_id:
+        c.execute("SELECT id, member_id, date, hours, work_type, notes FROM work_hours WHERE member_id = ? ORDER BY date DESC", (member_id,))
+    else:
+        c.execute("SELECT id, member_id, date, hours, work_type, notes FROM work_hours ORDER BY date DESC")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_work_hours_by_member(member_id):
+    """Return all work hours for a specific member."""
+    return get_work_hours(member_id=member_id)
+
+def get_work_hours_by_id(entry_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, member_id, date, hours, work_type, notes FROM work_hours WHERE id=?", (entry_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_work_hours(entry_id, date, hours, work_type, notes):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        UPDATE work_hours
+        SET date=?, hours=?, work_type=?, notes=?
+        WHERE id=?
+    """, (date, hours, work_type, notes, entry_id))
+    conn.commit()
+    conn.close()
+
+def delete_work_hours(entry_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM work_hours WHERE id=?", (entry_id,))
+    conn.commit()
+    conn.close()
+
+def update_member_basic(member_id, first_name, last_name, dob):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE members
+        SET first_name=?, last_name=?, dob=?
+        WHERE id=?
+    """, (first_name, last_name, dob, member_id))
+    conn.commit()
+    conn.close()
+
+def update_member_contact(member_id, email, email2, phone, address, city, state, zip_code):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE members
+        SET email=?, email2=?, phone=?, address=?, city=?, state=?, zip=?
+        WHERE id=?
+    """, (email, email2, phone, address, city, state, zip_code, member_id))
+    conn.commit()
+    conn.close()
+
+def update_member_membership(member_id, badge_number, membership_type, join_date, sponsor, card_internal, card_external):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE members
+        SET badge_number=?, membership_type=?, join_date=?, sponsor=?, card_internal=?, card_external=?
+        WHERE id=?
+    """, (badge_number, membership_type, join_date, sponsor, card_internal, card_external, member_id))
+    conn.commit()
+    conn.close()
+
+def get_all_work_hours():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT wh.id, wh.member_id, wh.date, wh.hours, wh.work_type, wh.notes,
+               m.first_name, m.last_name
+        FROM work_hours wh
+        JOIN members m ON wh.member_id = m.id
+        ORDER BY wh.date DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "id": row[0],
+            "member_id": row[1],
+            "date": row[2],
+            "hours": row[3],
+            "work_type": row[4],
+            "notes": row[5],
+            "first_name": row[6],
+            "last_name": row[7],
+        })
+    return result
+
+# Ensure work_hours table exists on import
+try:
+    init_work_hours_table()
+except Exception as e:
+    print("⚠️ Failed to initialize work_hours table:", e)
+

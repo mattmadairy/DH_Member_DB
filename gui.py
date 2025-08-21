@@ -1,3 +1,4 @@
+# gui.py
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, PhotoImage
 import database
@@ -5,6 +6,7 @@ import sys
 import os
 import member_form
 import reporting_window
+import work_hours_reporting_window
 import settings_window
 import csv
 import tempfile
@@ -51,8 +53,10 @@ class MemberApp:
         menubar.add_cascade(label="Reports", menu=reports_menu)
         reports_menu.add_command(
             label="Dues",
-            command=lambda: reporting_window.ReportingWindow(self.root)
-        )
+            command=lambda: reporting_window.ReportingWindow(self.root))
+        reports_menu.add_command(label="Work Hours",
+        command=self.show_work_hours_report)
+
         # Recycle Bin
         menubar.add_command(label="Recycle Bin", command=self._show_recycle_bin)
 
@@ -111,8 +115,8 @@ class MemberApp:
         self.load_data()
 
         # --- Keyboard shortcuts ---
-        self.root.bind_all("<Control-p>", lambda e: self._print_members())   # Windows/Linux
-        self.root.bind_all("<Command-p>", lambda e: self._print_members())   # macOS
+        #self.root.bind_all("<Control-p>", lambda e: self._print_members())   # Windows/Linux
+        #self.root.bind_all("<Command-p>", lambda e: self._print_members())   # macOS
 
     def _make_tree_with_scrollbars(self, parent, columns):
         container = ttk.Frame(parent)
@@ -232,29 +236,35 @@ class MemberApp:
         for item in items:
             rows.append(tree.item(item, "values"))
 
+        # Compute column widths
         col_widths = [max(len(str(row[i])) for row in rows) for i in range(len(headings))]
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         width_sum = sum(col_widths) + 3 * (len(col_widths) - 1)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # ----- Simple header like reports -----
         lines = [
-            "Membership List".center(width_sum),
-            f"Tab: {current_tab}".center(width_sum),
+            "Dug Hill Rod & Gun Club".center(width_sum),
+            f"Membership List - {current_tab}".center(width_sum),
             f"Generated: {timestamp}".center(width_sum),
-            ""
+            "",
         ]
 
-        for idx, row in enumerate(rows):
+        # Table header
+        header_line = "   ".join(str(headings[i]).ljust(col_widths[i]) for i in range(len(headings)))
+        lines.append(header_line)
+        lines.append("-" * len(header_line))
+
+        # Table rows
+        for row in rows[1:]:
             line = "   ".join(str(row[i]).ljust(col_widths[i]) for i in range(len(row)))
-            if idx == 0:
-                lines.append(line)
-                lines.append("-" * len(line))
-            else:
-                lines.append(line)
+            lines.append(line)
+
         lines.append("")
         lines.append("End of List".center(width_sum))
 
         report_text = "\n".join(lines)
 
+        # ----- Preview Window -----
         preview = tk.Toplevel(self.root)
         preview.title("Print Preview - Members")
         preview.geometry("800x600")
@@ -290,6 +300,7 @@ class MemberApp:
 
         ttk.Button(btn_frame, text="🖨 Print", command=do_print).pack(side="right", padx=5)
         ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=5)
+
 
     # ---------------- EXPORT ---------------- #
     def _show_export_dialog(self):
@@ -444,9 +455,7 @@ class MemberApp:
             return
 
     def _on_search(self, event=None):
-        """Live filter across all tabs; safe against app shutdown."""
         query = (self.search_var.get() or "").lower()
-
         try:
             for tree in self.trees.values():
                 tree.delete(*tree.get_children())
@@ -456,20 +465,22 @@ class MemberApp:
                 if query else self.all_members_data
             )
 
-            # Refill per tab
             for data in filtered:
-                # All
+                # Insert into "All"
                 t_all = self.trees.get("All")
                 if t_all:
                     t_all.insert("", "end", values=data)
 
-                # Specific type
+                # Insert into specific type tab
                 mt = data[2]
                 t_type = self.trees.get(mt)
                 if t_type:
                     t_type.insert("", "end", values=data)
         except tk.TclError:
-            return
+            pass
+
+        return "break"  # <-- important! stops event propagation
+
 
     # ---------------- RECYCLE BIN ---------------- #
     def _show_recycle_bin(self):
@@ -568,8 +579,6 @@ class MemberApp:
             if not selected:
                 messagebox.showwarning("No selection", "Please select one or more members to delete.")
                 return
-            if not messagebox.askyesno("Confirm", "Are you sure you want to delete selected members?"):
-                return
 
             for sel in selected:
                 member_id = tree.item(sel)["values"][0]
@@ -603,12 +612,30 @@ class MemberApp:
                 return
             if not messagebox.askyesno("Permanent Delete", "This cannot be undone. Delete permanently?"):
                 return
+
             for sel in selected:
                 member_id = tree.item(sel)["values"][0]
+
+                # 1️⃣ Get the member's current data
+                member_data = database.get_member_by_id(member_id)
+                if member_data:
+                    from datetime import datetime
+                    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # ✅ insert_deleted_member now handles columns dynamically
+                    database.archive_member(member_data)
+
+
+                # 2️⃣ Permanently remove from members table
                 database.permanent_delete_member(member_id)
+
+            # 3️⃣ Refresh Recycle Bin UI
             refresh_recycle_bin()
         except tk.TclError:
             return
+
+
+
 
     def _on_tree_double_click(self, event):
         try:
@@ -676,6 +703,30 @@ class MemberApp:
     def open_settings(self):
         settings_window.SettingsWindow(self.root)
 
+    def show_work_hours_report(self):
+        report_win = tk.Toplevel(self.root)
+        report_win.title("Work Hours Report")
+        report_win.geometry("700x400")
+
+        columns = ("Member", "Date", "Work Type", "Hours", "Notes")
+        tree = ttk.Treeview(report_win, columns=columns, show="headings")
+        for col, width in [("Member", 150), ("Date", 100), ("Work Type", 100), ("Hours", 60), ("Notes", 250)]:
+            tree.heading(col, text=col)
+            tree.column(col, width=width, anchor="w")
+        tree.pack(fill="both", expand=True)
+
+        yscroll = ttk.Scrollbar(report_win, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=yscroll.set)
+        yscroll.pack(side="right", fill="y")
+
+        # Fetch work hours from database
+        try:
+            records = database.get_all_work_hours()  # <-- database.py must have this function
+            for r in records:
+                member_name = f"{r['first_name']} {r['last_name']}"
+                tree.insert("", "end", values=(member_name, r['date'], r['work_type'], r['hours'], r['notes']))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load work hours: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
