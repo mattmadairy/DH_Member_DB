@@ -5,12 +5,15 @@ import database
 from datetime import datetime
 
 class MemberForm:
-    def __init__(self, parent, member_id=None, on_save_callback=None, open_tab=None, on_dues_changed=None):
+    def __init__(self, parent, member_id=None, on_save_callback=None,
+                 open_tab=None, on_dues_changed=None, on_hours_changed=None):
+
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
         self.member_id = member_id
         self.on_save_callback = on_save_callback
         self.on_dues_changed = on_dues_changed
+        self.on_hours_changed = on_hours_changed
 
         self.top.bind("<Return>", lambda event: self.save_member())
 
@@ -24,12 +27,14 @@ class MemberForm:
         self.tab_membership = ttk.Frame(self.notebook)
         self.tab_dues = ttk.Frame(self.notebook)
         self.tab_work_hours = ttk.Frame(self.notebook)
+        self.tab_attendance = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_basic, text="Basic Info")
         self.notebook.add(self.tab_contact, text="Contact")
         self.notebook.add(self.tab_membership, text="Membership")
         self.notebook.add(self.tab_dues, text="Dues History")
         self.notebook.add(self.tab_work_hours, text="Work Hours")
+        self.notebook.add(self.tab_attendance, text="Meeting Attendance")
 
         # Form variables
         self.badge_number_var = tk.StringVar()
@@ -109,10 +114,8 @@ class MemberForm:
             self.dues_tree.heading(col, text=col.title())
             self.dues_tree.column(col, width=width, anchor="w")
         self.dues_tree.column("year", anchor="center")
-
         self.dues_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
 
-        # Entry fields for adding new payment
         try:
             default_year = str(database.get_default_year())
         except Exception:
@@ -177,15 +180,49 @@ class MemberForm:
         ttk.Button(self.tab_work_hours, text="Edit Entry", command=self.edit_work_hours).grid(row=3, column=1, pady=5)
         ttk.Button(self.tab_work_hours, text="Delete Entry", command=self.delete_work_hours).grid(row=3, column=2, pady=5)
 
+        # --- Attendance Tab ---
+        self.att_tree = ttk.Treeview(
+            self.tab_attendance,
+            columns=("date","attended","notes"),
+            show="headings"
+        )
+        self.att_tree.heading("date", text="Meeting Date")
+        self.att_tree.heading("attended", text="Attended")
+        self.att_tree.heading("notes", text="Notes")
+
+        self.att_tree.column("date", width=100, anchor="w")
+        self.att_tree.column("attended", width=80, anchor="center")
+        self.att_tree.column("notes", width=200, anchor="w")
+
+        self.att_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
+
+        self.att_date_var = tk.StringVar(value=datetime.now().strftime("%m/%d/%Y"))
+        self.att_attended_var = tk.IntVar(value=1)
+        self.att_notes_var = tk.StringVar()
+
+        ttk.Label(self.tab_attendance, text="Date").grid(row=1, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(self.tab_attendance, textvariable=self.att_date_var, width=12).grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(self.tab_attendance, text="Attended").grid(row=1, column=2, sticky="e", padx=5, pady=2)
+        ttk.Checkbutton(self.tab_attendance, variable=self.att_attended_var).grid(row=1, column=3, sticky="w", padx=5, pady=2)
+        ttk.Label(self.tab_attendance, text="Notes").grid(row=2, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(self.tab_attendance, textvariable=self.att_notes_var, width=25).grid(row=2, column=1, columnspan=3, padx=5, pady=2)
+
+        ttk.Button(self.tab_attendance, text="Add Entry", command=self.add_attendance).grid(row=3, column=0, pady=5)
+        ttk.Button(self.tab_attendance, text="Edit Entry", command=self.edit_attendance).grid(row=3, column=1, pady=5)
+        ttk.Button(self.tab_attendance, text="Delete Entry", command=self.delete_attendance).grid(row=3, column=2, pady=5)
+
         if self.member_id:
             self.load_member()
             self.load_dues_history()
             self.load_work_hours()
+            self.load_attendance()
 
         if open_tab == "dues":
             self.notebook.select(self.tab_dues)
         elif open_tab == "work_hours":
             self.notebook.select(self.tab_work_hours)
+        elif open_tab == "attendance":
+            self.notebook.select(self.tab_attendance)
 
     # --- Member ---
     def load_member(self):
@@ -259,11 +296,11 @@ class MemberForm:
         records = database.get_dues_by_member(self.member_id)
         for record in records:
             self.dues_tree.insert("", "end", iid=record[0], values=(
-                record[4],  # year
-                f"{record[2]:.2f}",  # amount
-                record[3],  # date
-                record[5] or "",  # method
-                record[6] or ""   # notes
+                record[4],
+                f"{record[2]:.2f}",
+                record[3],
+                record[5] or "",
+                record[6] or ""
             ))
 
     def add_dues_payment(self):
@@ -336,10 +373,10 @@ class MemberForm:
         records = database.get_work_hours_by_member(self.member_id)
         for record in records:
             self.wh_tree.insert("", "end", iid=record[0], values=(
-                record[2],        # Date
-                record[4] or "",  # Work Type
-                record[3],        # Hours
-                record[5] or ""   # Notes
+                record[2],
+                record[4] or "",
+                record[3],
+                record[5] or ""
             ))
 
     def add_work_hours(self):
@@ -352,6 +389,9 @@ class MemberForm:
         self.wh_hours_var.set("")
         self.wh_type_var.set("")
         self.wh_notes_var.set("")
+        
+        if self.on_hours_changed:
+            self.on_hours_changed()
 
     def edit_work_hours(self):
         selected = self.wh_tree.selection()
@@ -381,6 +421,10 @@ class MemberForm:
                                        type_var.get() or None, notes_var.get() or None)
             popup.destroy()
             self.load_work_hours()
+            
+            if self.on_hours_changed:
+                self.on_hours_changed()
+
         ttk.Button(popup, text="Save", command=save_changes).grid(row=4, column=0, columnspan=2)
         popup.bind("<Return>", lambda e: save_changes())
 
@@ -392,3 +436,76 @@ class MemberForm:
         if messagebox.askyesno("Confirm", "Delete selected work hour entry?"):
             database.delete_work_hours(wh_id)
             self.load_work_hours()
+            
+        if self.on_hours_changed:
+            self.on_hours_changed()
+
+    # --- Attendance Methods ---
+    def load_attendance(self):
+        if not self.member_id:
+            return
+        for row in self.att_tree.get_children():
+            self.att_tree.delete(row)
+        records = database.get_meeting_attendance(self.member_id)
+        for record in records:
+            self.att_tree.insert("", "end", iid=record[0], values=(
+                record[2],
+                "Yes" if record[3] else "No",
+                record[4] or ""
+            ))
+
+    def add_attendance(self):
+        if not self.member_id:
+            return
+        database.add_meeting_attendance(
+            self.member_id,
+            self.att_date_var.get(),
+            self.att_attended_var.get(),
+            self.att_notes_var.get() or None
+        )
+        self.load_attendance()
+        self.att_notes_var.set("")
+        self.att_attended_var.set(1)
+
+    def edit_attendance(self):
+        selected = self.att_tree.selection()
+        if not selected:
+            return
+        att_id = int(selected[0])
+        records = database.get_meeting_attendance(self.member_id)
+        record = [r for r in records if r[0]==att_id][0]
+
+        popup = tk.Toplevel(self.top)
+        popup.title("Edit Attendance")
+        popup.grab_set()
+
+        date_var = tk.StringVar(value=record[2])
+        attended_var = tk.IntVar(value=record[3])
+        notes_var = tk.StringVar(value=record[4] or "")
+
+        ttk.Label(popup, text="Date").grid(row=0, column=0)
+        ttk.Entry(popup, textvariable=date_var, width=12).grid(row=0, column=1)
+        ttk.Label(popup, text="Attended").grid(row=1, column=0)
+        ttk.Checkbutton(popup, variable=attended_var).grid(row=1, column=1)
+        ttk.Label(popup, text="Notes").grid(row=2, column=0)
+        ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=2, column=1)
+
+        def save_changes():
+            database.update_meeting_attendance(att_id,
+                                               meeting_date=date_var.get(),
+                                               attended=attended_var.get(),
+                                               notes=notes_var.get() or None)
+            popup.destroy()
+            self.load_attendance()
+
+        ttk.Button(popup, text="Save", command=save_changes).grid(row=3, column=0, columnspan=2)
+        popup.bind("<Return>", lambda e: save_changes())
+
+    def delete_attendance(self):
+        selected = self.att_tree.selection()
+        if not selected:
+            return
+        att_id = int(selected[0])
+        if messagebox.askyesno("Confirm", "Delete selected attendance?"):
+            database.delete_meeting_attendance(att_id)
+            self.load_attendance()

@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
-import tempfile, os, platform, subprocess, csv
+import tempfile, os, platform, subprocess, csv, re
 
 class BaseReportWindow(tk.Toplevel):
     """Generic reporting window for tabular reports."""
@@ -32,7 +32,11 @@ class BaseReportWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind_all("<Control-p>", lambda e: self.print_report())
         self.bind_all("<Command-p>", lambda e: self.print_report())
-
+    
+    def _setup_controls(self):
+        """Hook for subclasses to add filter widgets or buttons."""
+        pass
+    
     # ---------- Geometry ----------
     def get_geometry_setting(self):
         import database
@@ -81,11 +85,27 @@ class BaseReportWindow(tk.Toplevel):
         self._sort_state[col_id] = not reverse
 
         def parse_value(col, text):
-            return text  # default implementation
+            if col == "badge":
+                try:
+                    return int(text)
+                except (ValueError, TypeError):
+                    return float("inf")
+            elif col == "hours":
+                try:
+                    return float(text)
+                except (ValueError, TypeError):
+                    return 0.0
+            else:  # name or anything else
+                return str(text).lower()
+
         data = [(self.tree.set(k, col_id), k) for k in self.tree.get_children("")]
         data.sort(key=lambda t: parse_value(col_id, t[0]), reverse=reverse)
         for index, (_, k) in enumerate(data):
             self.tree.move(k, "", index)
+
+        # Update the column heading to toggle sort direction
+        self.tree.heading(col_id, command=lambda: self.sort_by(col_id))
+
 
     # ---------- Printing ----------
     def print_report(self):
@@ -161,7 +181,28 @@ class BaseReportWindow(tk.Toplevel):
             messagebox.showwarning("Export", "No data to export.")
             return
 
-        default_name = f"{self.title().lower().replace(' ', '_')}.csv"
+        # Get the current date
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+        # Get the selected year if available
+        year_str = ""
+        if hasattr(self, "year_var") and self.year_var.get().strip():
+            year_str = self.year_var.get().strip()
+
+        # Function to sanitize any string for filenames
+        def sanitize(text):
+            text = re.sub(r'[^a-zA-Z0-9]+', '_', str(text))  # replace non-alphanum with _
+            text = re.sub(r'_+', '_', text)                  # collapse multiple underscores
+            return text.strip('_')                            # remove leading/trailing underscores
+
+        safe_report_name = sanitize(self.title().lower())
+        safe_year_str = sanitize(year_str)
+        safe_date_str = sanitize(date_str)
+
+        # Construct default filename: year_reportname_date.csv
+        parts = [part for part in [safe_year_str, safe_report_name, safe_date_str] if part]
+        default_name = "_".join(parts) + ".csv"
+
         file_path = filedialog.asksaveasfilename(
             initialfile=default_name,
             defaultextension=".csv",
@@ -187,3 +228,10 @@ class BaseReportWindow(tk.Toplevel):
     # ---------- Populate report placeholder ----------
     def populate_report(self):
         raise NotImplementedError("Subclasses must implement populate_report()")
+
+    def on_close(self):
+        self.save_geometry_setting()
+        # Unbind global shortcuts so they don’t fire after window is destroyed
+        self.unbind_all("<Control-p>")
+        self.unbind_all("<Command-p>")
+        self.destroy()

@@ -207,6 +207,24 @@ def migrate_all():
     conn.commit()
     conn.close()
 
+    # ---------------- Meeting Attendance Migration ----------------
+    c.execute("PRAGMA table_info(meeting_attendance)")
+    existing_cols = [col[1] for col in c.fetchall()]
+    required_meeting_attendance = ["id", "member_id", "meeting_date", "attended", "notes"]
+
+    if not existing_cols:
+        print("⚠️ Creating meeting_attendance table")
+        c.execute("""
+            CREATE TABLE meeting_attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                member_id INTEGER NOT NULL,
+                meeting_date TEXT NOT NULL,
+                attended INTEGER NOT NULL DEFAULT 1,
+                notes TEXT,
+                FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+            )
+        """)
+
 
 
 # ------------------ Settings Helpers ------------------ #
@@ -842,6 +860,8 @@ def update_member_membership(member_id, badge_number, membership_type, join_date
 def get_work_hours_by_year(year):
     conn = get_connection()
     c = conn.cursor()
+
+    # First try assuming ISO dates (YYYY-MM-DD or DATETIME)
     c.execute("""
         SELECT m.first_name, m.last_name, m.badge_number,
                SUM(w.hours) as total_hours
@@ -853,9 +873,23 @@ def get_work_hours_by_year(year):
         ORDER BY m.last_name, m.first_name
     """, (str(year),))
     rows = c.fetchall()
+
+    # If nothing found, try fallback using last 4 chars of string (e.g. MM/DD/YYYY)
+    if not rows:
+        c.execute("""
+            SELECT m.first_name, m.last_name, m.badge_number,
+                   SUM(w.hours) as total_hours
+            FROM work_hours w
+            JOIN members m ON m.id = w.member_id
+            WHERE substr(w.date, -4) = ?
+              AND m.deleted = 0
+            GROUP BY m.id
+            ORDER BY m.last_name, m.first_name
+        """, (str(year),))
+        rows = c.fetchall()
+
     conn.close()
     return rows
-
 
 
 def get_all_work_hours():
@@ -885,9 +919,142 @@ def get_all_work_hours():
         })
     return result
 
+# ------------------ Meeting Attendance Functions ----------------- #
+def init_meeting_attendance_table():
+    """Ensure the meeting_attendance table exists with correct schema."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS meeting_attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER NOT NULL,
+            meeting_date TEXT NOT NULL,
+            attended INTEGER NOT NULL DEFAULT 1,
+            notes TEXT,
+            FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def add_meeting_attendance(member_id, meeting_date, attended=1, notes=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO meeting_attendance (member_id, meeting_date, attended, notes)
+        VALUES (?, ?, ?, ?)
+    """, (member_id, meeting_date, attended, notes))
+    conn.commit()
+    conn.close()
+
+def update_meeting_attendance(entry_id, meeting_date=None, attended=None, notes=None):
+    conn = get_connection()
+    c = conn.cursor()
+    updates = []
+    params = []
+    if meeting_date is not None:
+        updates.append("meeting_date=?")
+        params.append(meeting_date)
+    if attended is not None:
+        updates.append("attended=?")
+        params.append(attended)
+    if notes is not None:
+        updates.append("notes=?")
+        params.append(notes)
+    params.append(entry_id)
+    c.execute(f"""
+        UPDATE meeting_attendance
+        SET {', '.join(updates)}
+        WHERE id=?
+    """, params)
+    conn.commit()
+    conn.close()
+
+def delete_meeting_attendance(entry_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM meeting_attendance WHERE id=?", (entry_id,))
+    conn.commit()
+    conn.close()
+
+def get_meeting_attendance(member_id=None, year=None, month=None):
+    """
+    Returns attendance rows.
+    Optionally filter by member_id, year (YYYY), month (1-12).
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    query = "SELECT id, member_id, meeting_date, attended, notes FROM meeting_attendance WHERE 1=1"
+    params = []
+    if member_id is not None:
+        query += " AND member_id=?"
+        params.append(member_id)
+    if year is not None:
+        query += " AND strftime('%Y', meeting_date)=?"
+        params.append(str(year))
+    if month is not None:
+        query += " AND strftime('%m', meeting_date)=?"
+        params.append(f"{int(month):02d}")
+    query += " ORDER BY meeting_date DESC"
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_attendance_summary(year=None, month=None):
+    """
+    Returns summary counts for each member, using badge_number instead of member_id.
+    Handles both ISO dates (YYYY-MM-DD) and US-style dates (MM/DD/YYYY).
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    # Left join so attendance rows without a member still appear
+    query = """
+        SELECT 
+            COALESCE(m.badge_number, 'Unknown') AS badge_number,
+            COALESCE(m.first_name, 'Unknown') AS first_name,
+            COALESCE(m.last_name, 'Unknown') AS last_name,
+            COUNT(ma.id) AS total_meetings,
+            SUM(ma.attended) AS attended_meetings
+        FROM meeting_attendance ma
+        LEFT JOIN members m ON ma.member_id = m.id
+    """
+    
+    conditions = []
+    params = []
+
+    if year is not None:
+        conditions.append(
+            "(strftime('%Y', ma.meeting_date) = ? OR substr(ma.meeting_date, -4) = ?)"
+        )
+        params.extend([str(year), str(year)])
+
+    if month is not None:
+        month_num = f"{int(month):02d}"
+        conditions.append(
+            "(strftime('%m', ma.meeting_date) = ? OR substr(ma.meeting_date, 1, 2) = ?)"
+        )
+        params.extend([month_num, month_num])
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " GROUP BY ma.member_id ORDER BY last_name, first_name"
+
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+
+
 # Ensure work_hours table exists on import
 try:
     init_work_hours_table()
+    init_meeting_attendance_table()
 except Exception as e:
     print("⚠️ Failed to initialize work_hours table:", e)
 

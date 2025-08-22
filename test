@@ -1,0 +1,2 @@
+import database
+print(database.get_meeting_attendance())  # List raw rows

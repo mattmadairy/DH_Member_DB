@@ -6,13 +6,14 @@ import sys
 import os
 import member_form
 import reporting_window
-import work_hours_reporting_window
 import settings_window
 import csv
 import tempfile
 import platform
 import subprocess
 from datetime import datetime
+from attendance_report import AttendanceReport  # <-- add this near other report imports
+
 # NOTE: we *intentionally* do not import openpyxl at top-level.
 # We'll import it lazily inside _show_import_dialog() if needed.
 
@@ -56,6 +57,8 @@ class MemberApp:
             command=lambda: reporting_window.ReportingWindow(self.root))
         reports_menu.add_command(label="Work Hours",
         command=self.show_work_hours_report)
+        reports_menu.add_command(label="Meeting Attendance",
+                         command=lambda: AttendanceReport(self.root))
 
         # Recycle Bin
         menubar.add_command(label="Recycle Bin", command=self._show_recycle_bin)
@@ -114,9 +117,6 @@ class MemberApp:
         self._build_gui()
         self.load_data()
 
-        # --- Keyboard shortcuts ---
-        #self.root.bind_all("<Control-p>", lambda e: self._print_members())   # Windows/Linux
-        #self.root.bind_all("<Command-p>", lambda e: self._print_members())   # macOS
 
     def _make_tree_with_scrollbars(self, parent, columns):
         container = ttk.Frame(parent)
@@ -163,19 +163,13 @@ class MemberApp:
         search_entry.bind("<KeyRelease>", self._on_search)
         tk.Label(search_frame, text="Search:").pack(side="right")
         
-        # Quick Buttons
         
-        #ttk.Button(search_frame, text="🗑️ Recycle Bin", command=self._show_recycle_bin).pack(side="right", padx=2)
-        #ttk.Button(search_frame, text="❌ Delete Selected", command=self.delete_selected).pack(side="right", padx=2)
-        #ttk.Button(search_frame, text="✏️ Edit Selected", command=self.edit_selected).pack(side="right", padx=2)
-        #ttk.Button(search_frame, text="➕ Add Member", command=self.add_member).pack(side="right", padx=2)
-
         # Notebook tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True)
 
         columns = (
-            "ID", "Badge Number", "Membership Type", "First Name", "Last Name",
+            "ID", "Badge", "Membership Type", "First Name", "Last Name",
             "Date of Birth", "Email Address", "Email Address 2", "Phone Number",
             "Address", "City", "State", "Zip Code", "Join Date", "Sponsor",
             "Card/Fob Internal Number", "Card/Fob External Number",
@@ -210,7 +204,7 @@ class MemberApp:
     def _sort_treeview(self, tree, col, reverse):
         items = [(tree.set(k, col), k) for k in tree.get_children("")]
         try:
-            if col == "Badge Number":
+            if col == "Badge":
                 items.sort(key=lambda t: int(t[0]) if str(t[0]).isdigit() else float("inf"), reverse=reverse)
             else:
                 items.sort(key=lambda t: t[0].lower() if isinstance(t[0], str) else t[0], reverse=reverse)
