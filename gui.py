@@ -704,29 +704,9 @@ class MemberApp:
         settings_window.SettingsWindow(self.root)
 
     def show_work_hours_report(self):
-        report_win = tk.Toplevel(self.root)
-        report_win.title("Work Hours Report")
-        report_win.geometry("700x400")
+        import work_hours_reporting_window
+        work_hours_reporting_window.WorkHoursReportingWindow(self.root)
 
-        columns = ("Member", "Date", "Work Type", "Hours", "Notes")
-        tree = ttk.Treeview(report_win, columns=columns, show="headings")
-        for col, width in [("Member", 150), ("Date", 100), ("Work Type", 100), ("Hours", 60), ("Notes", 250)]:
-            tree.heading(col, text=col)
-            tree.column(col, width=width, anchor="w")
-        tree.pack(fill="both", expand=True)
-
-        yscroll = ttk.Scrollbar(report_win, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=yscroll.set)
-        yscroll.pack(side="right", fill="y")
-
-        # Fetch work hours from database
-        try:
-            records = database.get_all_work_hours()  # <-- database.py must have this function
-            for r in records:
-                member_name = f"{r['first_name']} {r['last_name']}"
-                tree.insert("", "end", values=(member_name, r['date'], r['work_type'], r['hours'], r['notes']))
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load work hours: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()

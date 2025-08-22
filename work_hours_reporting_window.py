@@ -1,85 +1,60 @@
 # work_hours_reporting_window.py
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+
 import database
+import member_form
 from report_base import BaseReportWindow
-from member_form import MemberForm
 
 
 class WorkHoursReportingWindow(BaseReportWindow):
-    columns = ("badge", "name", "type", "total_hours", "last_shift")
-    column_widths = (90, 220, 110, 100, 130)
+    columns = ("badge", "name", "hours")
+    column_widths = (90, 260, 100)
 
     def __init__(self, parent):
-        super().__init__(parent, "Work Hours Report", "work_hours_window_geometry")
-        self.report_mode = "all"
+        super().__init__(parent, "Work Hours Report", "work_hours_report_geometry")
+
+        # Default to same size as dues window if no saved geometry
+        try:
+            if not self.get_geometry_setting():
+                self.geometry("900x560")
+        except Exception:
+            self.geometry("900x560")
+
         self.tree.bind("<Double-1>", self.on_row_double_click)
 
     # ---------- Setup top controls ----------
     def _setup_controls(self):
-        # Top row frame for all controls
         top = tk.Frame(self)
         top.pack(fill="x", pady=8)
 
-        # Year label + spinbox
-        tk.Label(top, text="Select Year:").pack(side="left", padx=(10,6))
+        tk.Label(top, text="Select Year:").pack(side="left", padx=(10, 6))
         self.year_var = tk.StringVar(value=str(database.get_default_year()))
         tk.Spinbox(top, from_=2000, to=2100, textvariable=self.year_var, width=6).pack(side="left")
 
-        # Group 1: Run Report buttons
-        button_padx = 5
-        tk.Button(top, text="Run All Work Hours", command=lambda: self.populate_report("all")).pack(side="left", padx=button_padx)
-        tk.Button(top, text="Run Completed Shifts", command=lambda: self.populate_report("completed")).pack(side="left", padx=button_padx)
-        tk.Button(top, text="Run Missing Shifts", command=lambda: self.populate_report("missing")).pack(side="left", padx=button_padx)
-
-        # Spacer between Run Report buttons and Print/Export
-        tk.Label(top, width=2).pack(side="left")  # small empty label as spacer
-
-        # Group 2: Print / Export buttons
-        tk.Button(top, text="Print Report", command=self.print_report).pack(side="left", padx=button_padx)
-        tk.Button(top, text="Export CSV", command=self.export_csv).pack(side="left", padx=button_padx)
-
-        # Membership type filters below
-        filters = tk.Frame(self)
-        filters.pack(fill="x", padx=10, pady=(0,8))
-        tk.Label(filters, text="Include Types:").grid(row=0, column=0, sticky="w")
-
-        self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Waitlist", "Former"]
-        self.type_vars = {}
-        defaults = {"Probationary", "Associate", "Active"}
-        for col, mtype in enumerate(self.membership_types, start=1):
-            var = tk.BooleanVar(value=(mtype in defaults))
-            cb = tk.Checkbutton(filters, text=mtype, variable=var)
-            cb.grid(row=0, column=col, sticky="w", padx=(8,0))
-            self.type_vars[mtype] = var
+        tk.Button(top, text="Run Report", command=self.populate_report).pack(side="left", padx=10)
+        tk.Button(top, text="Print Report", command=self.print_report).pack(side="left", padx=10)
+        tk.Button(top, text="Export CSV", command=self.export_csv).pack(side="left", padx=2)
 
     # ---------- Populate report ----------
-    def populate_report(self, mode="all"):
-        self.report_mode = mode
+    def populate_report(self):
         year = str(self.year_var.get()).strip()
-        selected = [t for t, var in self.type_vars.items() if var.get()]
-        if not selected:
-            messagebox.showwarning("No Types", "Select at least one membership type to include.")
-            return
-
         try:
-            if mode == "completed":
-                rows = database.get_completed_work_hours(year, selected)
-            elif mode == "missing":
-                rows = database.get_missing_work_hours(year, selected)
-            else:
-                rows = database.get_work_hours(year, selected)
+            # Should now return rows like:
+            # (first, last, badge, total_hours)
+            rows = database.get_work_hours_by_year(year)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to fetch work hours: {e}")
             return
 
         self.clear_tree()
-        for first, last, mtype, total_hours, last_shift, badge in rows:
-            self.tree.insert("", "end", values=(
-                badge or "", f"{last}, {first}", mtype,
-                f"{total_hours:.2f}" if total_hours else "0.00",
-                last_shift or ""
-            ))
+
+        for first, last, badge, total_hours in rows:
+            name = f"{last}, {first}"
+            self.tree.insert(
+                "", "end",
+                values=(badge or "", name, total_hours or "")
+            )
 
     # ---------- Double-click to open MemberForm ----------
     def _member_id_by_badge(self, badge_text):
@@ -92,6 +67,9 @@ class WorkHoursReportingWindow(BaseReportWindow):
             return row[0] if row else None
         except Exception:
             return None
+
+    def _on_member_hours_changed(self):
+        self.populate_report()
 
     def on_row_double_click(self, event):
         item = self.tree.focus()
@@ -107,8 +85,9 @@ class WorkHoursReportingWindow(BaseReportWindow):
             messagebox.showerror("Open Member", f"No member found with badge '{badge}'.")
             return
 
-        MemberForm(
+        member_form.MemberForm(
             self,
             member_id=member_id,
-            open_tab="work_hours"
+            open_tab="work_hours",
+            on_dues_changed=self._on_member_hours_changed
         )

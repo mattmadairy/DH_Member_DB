@@ -839,6 +839,25 @@ def update_member_membership(member_id, badge_number, membership_type, join_date
     conn.commit()
     conn.close()
 
+def get_work_hours_by_year(year):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT m.first_name, m.last_name, m.badge_number,
+               SUM(w.hours) as total_hours
+        FROM work_hours w
+        JOIN members m ON m.id = w.member_id
+        WHERE strftime('%Y', w.date) = ?
+          AND m.deleted = 0
+        GROUP BY m.id
+        ORDER BY m.last_name, m.first_name
+    """, (str(year),))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+
 def get_all_work_hours():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
