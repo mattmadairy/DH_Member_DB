@@ -1,259 +1,73 @@
-# attendance_report.py
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from datetime import datetime
-import tempfile, os, platform, subprocess
+from tkinter import ttk, messagebox
 import database
-import member_form
-from report_base import BaseReportWindow
-import csv
+import calendar
 
-
-class AttendanceReport(BaseReportWindow):
-    columns = ("badge", "name", "total_meetings")
-    column_widths = (90, 260, 120)
-
+class AttendanceReport(tk.Frame):
     def __init__(self, parent):
-        self.show_name_in_print = True
-        super().__init__(parent, "Attendance Report", "attendance_report_geometry")
-        self.tree.bind("<Double-1>", self.on_row_double_click)
-
-    # ---------- Setup top controls ----------
-    def _setup_controls(self):
-        top = tk.Frame(self)
-        top.pack(fill="x", pady=8)
-
-        # Year selector
-        tk.Label(top, text="Select Year:").pack(side="left", padx=(10, 6))
-        self.year_var = tk.StringVar(value=str(database.get_default_year()))
-        tk.Spinbox(top, from_=2000, to=2100, textvariable=self.year_var, width=6).pack(side="left")
-
-        # Month selector with "All" option
-        tk.Label(top, text="Select Month:").pack(side="left", padx=(10, 6))
-        self.months = ["All", "January", "February", "March", "April", "May", "June",
-                       "July", "August", "September", "October", "November", "December"]
+        super().__init__(parent)
+        self.year_var = tk.IntVar()
         self.month_var = tk.StringVar(value="All")
-        month_dropdown = ttk.Combobox(top, values=self.months, textvariable=self.month_var,
-                                      width=15, state="readonly", justify="center")
-        month_dropdown.pack(side="left")
+        self.columns = ("badge", "name", "status")  # will update dynamically for "All"
+        self.column_widths = (90, 260, 120)
 
-        # Buttons
-        tk.Button(top, text="Generate Report", command=self.populate_report).pack(side="left", padx=10)
-        tk.Button(top, text="Print Report", command=self.print_report).pack(side="left", padx=10)
-        tk.Button(top, text="Export CSV", command=self.export_csv).pack(side="left", padx=2)
+        self._setup_controls()
+        self.tree = ttk.Treeview(self, columns=self.columns, show="headings")
+        for col, width in zip(self.columns, self.column_widths):
+            self.tree.heading(col, text=col.title())
+            self.tree.column(col, width=width)
+        self.tree.pack(fill="both", expand=True, pady=5)
 
-        # Add Name toggle
-        tk.Checkbutton(
-            top,
-            text="Exclude Name in Print",
-            variable=tk.BooleanVar(value=self.show_name_in_print),
-            command=lambda: setattr(self, 'show_name_in_print', not self.show_name_in_print)
-        ).pack(side="left", padx=10)
-
-    # ---------- Populate report ----------
-    def populate_report(self):
-        year = self.year_var.get().strip()
-        month = self.month_var.get()
-        month_num = None if month == "All" else f"{self.months.index(month):02d}"
-
-        try:
-            rows = database.get_attendance_summary(year=year or None, month=month_num)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to fetch attendance data: {e}")
-            return
-
-        self.clear_tree()
-
-        if not rows:
-            # Show "No Data" centered in the tree
-            self.tree.tag_configure("center", anchor="center")
-            self.tree.insert("", "end", values=("", "No Data", ""), tags=("center",))
-            return
-
-        for badge, first, last, attended, total in rows:
-            name = f"{last}, {first}"
-            self.tree.insert("", "end", values=(badge or "", name, total or 0))
-
-    # ---------- CSV export ----------
-    def export_csv(self):
-        items = self.tree.get_children()
-        if not items or (len(items) == 1 and self.tree.item(items[0], "values")[1] == "No Data"):
-            messagebox.showwarning("Export CSV", "No data to export.")
-            return
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
-        if not path:
-            return
-        try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                headers = ["Badge", "Name", "Total Meetings"]
-                writer.writerow(headers)
-                for item in items:
-                    writer.writerow(self.tree.item(item, "values"))
-            messagebox.showinfo("Export CSV", f"CSV exported successfully to {path}")
-        except Exception as e:
-            messagebox.showerror("Export CSV", f"Failed to export CSV: {e}")
-
-    # ---------- Member lookup ----------
-    def _member_id_by_badge(self, badge_text):
-        try:
-            conn = database.get_connection()
-            c = conn.cursor()
-            c.execute("SELECT id FROM members WHERE badge_number=? AND deleted=0 LIMIT 1", (str(badge_text),))
-            row = c.fetchone()
-            conn.close()
-            return row[0] if row else None
-        except Exception:
-            return None
-
-    def _on_member_data_changed(self):
         self.populate_report()
 
-    # ---------- Double-click to open member form ----------
-    def on_row_double_click(self, event):
-        item = self.tree.focus()
-        if not item:
-            return
-        vals = self.tree.item(item, "values")
-        badge = vals[0] if vals else None
-        if not badge:
-            messagebox.showwarning("Open Member", "No badge number on the selected row.")
-            return
-        member_id = self._member_id_by_badge(badge)
-        if not member_id:
-            messagebox.showerror("Open Member", f"No member found with badge '{badge}'.")
-            return
+    def _setup_controls(self):
+        frame = tk.Frame(self)
+        frame.pack(fill="x", pady=3)
 
-        member_form.MemberForm(
-            self,
-            member_id=member_id,
-            open_tab="attendance",
-            on_hours_changed=self._on_member_data_changed
-        )
+        # Year scrollbox: default from settings table
+        try:
+            default_year = database.get_setting("default_year")
+            default_year = int(default_year)
+        except Exception:
+            default_year = 2025
 
-    # ---------- Print report ----------
-    def print_report(self):
-        import tkinter.font as tkfont
+        self.year_var.set(default_year)
+        tk.Label(frame, text="Year:").pack(side="left", padx=(10,0))
+        tk.Spinbox(frame, from_=2000, to=2100, textvariable=self.year_var, width=6).pack(side="left", padx=(0,10))
 
-        items = self.tree.get_children()
-        if not items or (len(items) == 1 and self.tree.item(items[0], "values")[1] == "No Data"):
-            messagebox.showwarning("Print", "No data to print.")
-            return
+        # Month dropdown
+        tk.Label(frame, text="Month:").pack(side="left")
+        months = ["All"] + list(calendar.month_name[1:])
+        month_cb = ttk.Combobox(frame, values=months, textvariable=self.month_var, state="readonly", width=10)
+        month_cb.pack(side="left", padx=(0,10))
+        month_cb.configure(background="white")  # white background
 
-        headings = [self.tree.heading(col)["text"] for col in self.tree["columns"]]
-        rows = [self.tree.item(item, "values") for item in items]
+        # Run Report button
+        tk.Button(frame, text="Run Report", command=self.populate_report).pack(side="left", padx=(10,0))
 
-        MAX_BADGE_WIDTH = 8
-        MAX_NAME_WIDTH = 25
-        MAX_ATTEND_WIDTH = 6
+    def populate_report(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
 
-        def truncate(text, width):
-            text = str(text)
-            return text if len(text) <= width else text[:width - 3] + "..."
+        year = self.year_var.get()
+        month_name = self.month_var.get()
 
-        col_widths = [
-            min(MAX_BADGE_WIDTH, max(len(str(headings[0])), *(len(str(r[0])) for r in rows))),
-            min(MAX_NAME_WIDTH, max(len(str(headings[1])), *(len(str(r[1])) for r in rows))),
-            min(MAX_ATTEND_WIDTH, max(len(str(headings[2])), *(len(str(r[2])) for r in rows))),
-        ]
+        try:
+            members = database.get_all_members()
+            for m in members:
+                member_id = m[0]
+                badge = m[1]
+                name = f"{m[3]} {m[4]}"
 
-        gap = " " * 6
-
-        def format_row(row):
-            if self.show_name_in_print:
-                return (" " * 3).join([
-                    str(truncate(row[0], col_widths[0])).ljust(col_widths[0]),
-                    str(truncate(row[1], col_widths[1])).ljust(col_widths[1]),
-                    str(truncate(row[2], col_widths[2])).rjust(col_widths[2]),
-                ])
-            else:
-                return (" " * 3).join([
-                    str(truncate(row[0], col_widths[0])).ljust(col_widths[0]),
-                    str(truncate(row[2], col_widths[2])).rjust(col_widths[2]),
-                ])
-
-        if self.show_name_in_print:
-            header = (" " * 3).join([headings[0].ljust(col_widths[0]),
-                                     headings[1].ljust(col_widths[1]),
-                                     headings[2].rjust(col_widths[2])])
-        else:
-            header = (" " * 3).join([headings[0].ljust(col_widths[0]),
-                                     headings[2].rjust(col_widths[2])])
-        separator = "-" * len(header)
-
-        temp_win = tk.Toplevel(self)
-        temp_win.withdraw()
-        text_widget = tk.Text(temp_win, wrap="none", font=("Courier New", 10))
-        text_widget.pack()
-        font = tkfont.Font(font=text_widget.cget("font"))
-        line_height = font.metrics("linespace")
-        ROWS_PER_COLUMN = max(1, 560 // line_height - 8)
-        temp_win.destroy()
-
-        pages, idx = [], 0
-        while idx < len(rows):
-            left_rows = rows[idx: idx + ROWS_PER_COLUMN]
-            idx += ROWS_PER_COLUMN
-            right_rows = rows[idx: idx + ROWS_PER_COLUMN]
-            idx += ROWS_PER_COLUMN
-
-            full_width = len(header + gap + header)
-
-            page_lines = [
-                "Dug Hill Rod & Gun Club".center(full_width),
-                "Meeting Attendance Report".center(full_width),
-                f"Timeframe: {self.month_var.get()}".center(full_width),
-                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}".center(full_width),
-                "",
-                header + gap + header,
-                separator + gap + separator,
-            ]
-
-            for i in range(max(len(left_rows), len(right_rows))):
-                left = format_row(left_rows[i]) if i < len(left_rows) else " " * len(header)
-                right = format_row(right_rows[i]) if i < len(right_rows) else " " * len(header)
-                page_lines.append(left + gap + right)
-
-            pages.append(page_lines)
-
-        total_pages = len(pages)
-        report_text = ""
-        for i, lines in enumerate(pages):
-            lines.append("")
-            lines.append(f"Page {i+1} of {total_pages}".center(full_width))
-            lines.append("End of Report".center(full_width))
-            report_text += "\n".join(lines) + "\n\n"
-
-        preview = tk.Toplevel(self)
-        preview.title("Print Preview")
-        text = tk.Text(preview, wrap="none", font=("Courier New", 10))
-        text.insert("1.0", report_text)
-        text.configure(state="disabled")
-        text.pack(fill="both", expand=True, padx=5, pady=5)
-
-        yscroll = ttk.Scrollbar(preview, orient="vertical", command=text.yview)
-        xscroll = ttk.Scrollbar(preview, orient="horizontal", command=text.xview)
-        text.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-        yscroll.pack(side="right", fill="y")
-        xscroll.pack(side="bottom", fill="x")
-
-        btn_frame = tk.Frame(preview)
-        btn_frame.pack(fill="x", pady=5)
-
-        def do_print():
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
-            tmp.write(report_text.encode("utf-8"))
-            tmp.close()
-            try:
-                system = platform.system()
-                if system == "Windows":
-                    os.startfile(tmp.name, "print")
-                elif system == "Darwin":
-                    subprocess.run(["lp", tmp.name], check=False)
+                if month_name == "All":
+                    # Total meetings attended/exempted for the year
+                    total = database.count_member_attendance(member_id, year)
+                    self.tree.insert("", "end", values=(badge, name, total))
                 else:
-                    subprocess.run(["lpr", tmp.name], check=False)
-            except Exception as e:
-                messagebox.showerror("Print Error", f"Failed to print: {e}")
-
-        tk.Button(btn_frame, text="🖨 Print", command=do_print).pack(side="right", padx=5)
-        tk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=5)
+                    month_index = list(calendar.month_name).index(month_name)
+                    # Only show members with entries for that month
+                    status = database.get_member_status_for_month(member_id, year, month_index)
+                    if status:
+                        self.tree.insert("", "end", values=(badge, name, status))
+        except Exception as e:
+            messagebox.showerror("Attendance Report", f"Failed to fetch attendance data:\n{e}")
