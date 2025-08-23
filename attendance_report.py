@@ -1,6 +1,6 @@
 # attendance_report.py
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 import tempfile, os, platform, subprocess
 import database
@@ -33,7 +33,8 @@ class AttendanceReport(BaseReportWindow):
         self.months = ["All", "January", "February", "March", "April", "May", "June",
                        "July", "August", "September", "October", "November", "December"]
         self.month_var = tk.StringVar(value="All")
-        month_dropdown = ttk.Combobox(top, values=self.months, textvariable=self.month_var, width=6, state="readonly")
+        month_dropdown = ttk.Combobox(top, values=self.months, textvariable=self.month_var,
+                                      width=15, state="readonly", justify="center")
         month_dropdown.pack(side="left")
 
         # Buttons
@@ -56,13 +57,19 @@ class AttendanceReport(BaseReportWindow):
         month_num = None if month == "All" else f"{self.months.index(month):02d}"
 
         try:
-            # Returns rows like: (badge, first_name, last_name, meetings_attended, total_meetings)
             rows = database.get_attendance_summary(year=year or None, month=month_num)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to fetch attendance data: {e}")
             return
 
         self.clear_tree()
+
+        if not rows:
+            # Show "No Data" centered in the tree
+            self.tree.tag_configure("center", anchor="center")
+            self.tree.insert("", "end", values=("", "No Data", ""), tags=("center",))
+            return
+
         for badge, first, last, attended, total in rows:
             name = f"{last}, {first}"
             self.tree.insert("", "end", values=(badge or "", name, total or 0))
@@ -70,10 +77,10 @@ class AttendanceReport(BaseReportWindow):
     # ---------- CSV export ----------
     def export_csv(self):
         items = self.tree.get_children()
-        if not items:
+        if not items or (len(items) == 1 and self.tree.item(items[0], "values")[1] == "No Data"):
             messagebox.showwarning("Export CSV", "No data to export.")
             return
-        path = tk.filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
         if not path:
             return
         try:
@@ -129,115 +136,93 @@ class AttendanceReport(BaseReportWindow):
         import tkinter.font as tkfont
 
         items = self.tree.get_children()
-        if not items:
+        if not items or (len(items) == 1 and self.tree.item(items[0], "values")[1] == "No Data"):
             messagebox.showwarning("Print", "No data to print.")
             return
 
-        title_lines = ["Dug Hill Rod & Gun Club", "Meeting Attendance Report"]
-        headings = ["Badge", "Name", "Total Meetings"]
+        headings = [self.tree.heading(col)["text"] for col in self.tree["columns"]]
         rows = [self.tree.item(item, "values") for item in items]
 
-        # Maximum column widths
-        MAX_BADGE_WIDTH = 10
+        MAX_BADGE_WIDTH = 8
         MAX_NAME_WIDTH = 25
-        MAX_TOTAL_WIDTH = 8
+        MAX_ATTEND_WIDTH = 6
 
         def truncate(text, width):
             text = str(text)
-            return text if len(text) <= width else text[:width-3] + "..."
+            return text if len(text) <= width else text[:width - 3] + "..."
 
-        col_widths = [MAX_BADGE_WIDTH, MAX_NAME_WIDTH, MAX_TOTAL_WIDTH]
-        gap = " " * 10
+        col_widths = [
+            min(MAX_BADGE_WIDTH, max(len(str(headings[0])), *(len(str(r[0])) for r in rows))),
+            min(MAX_NAME_WIDTH, max(len(str(headings[1])), *(len(str(r[1])) for r in rows))),
+            min(MAX_ATTEND_WIDTH, max(len(str(headings[2])), *(len(str(r[2])) for r in rows))),
+        ]
 
-        # Estimate rows per column dynamically
-        preview_height = 560
-        temp_preview = tk.Toplevel(self)
-        temp_preview.withdraw()
-        text_widget = tk.Text(temp_preview, wrap="none", font=("Courier New", 10))
+        gap = " " * 6
+
+        def format_row(row):
+            if self.show_name_in_print:
+                return (" " * 3).join([
+                    str(truncate(row[0], col_widths[0])).ljust(col_widths[0]),
+                    str(truncate(row[1], col_widths[1])).ljust(col_widths[1]),
+                    str(truncate(row[2], col_widths[2])).rjust(col_widths[2]),
+                ])
+            else:
+                return (" " * 3).join([
+                    str(truncate(row[0], col_widths[0])).ljust(col_widths[0]),
+                    str(truncate(row[2], col_widths[2])).rjust(col_widths[2]),
+                ])
+
+        if self.show_name_in_print:
+            header = (" " * 3).join([headings[0].ljust(col_widths[0]),
+                                     headings[1].ljust(col_widths[1]),
+                                     headings[2].rjust(col_widths[2])])
+        else:
+            header = (" " * 3).join([headings[0].ljust(col_widths[0]),
+                                     headings[2].rjust(col_widths[2])])
+        separator = "-" * len(header)
+
+        temp_win = tk.Toplevel(self)
+        temp_win.withdraw()
+        text_widget = tk.Text(temp_win, wrap="none", font=("Courier New", 10))
         text_widget.pack()
         font = tkfont.Font(font=text_widget.cget("font"))
         line_height = font.metrics("linespace")
-        header_footer_lines = 6
-        ROWS_PER_COLUMN = max(1, preview_height // line_height - header_footer_lines)
-        temp_preview.destroy()
+        ROWS_PER_COLUMN = max(1, 560 // line_height - 8)
+        temp_win.destroy()
 
-        pages = []
-        idx = 0
+        pages, idx = [], 0
         while idx < len(rows):
             left_rows = rows[idx: idx + ROWS_PER_COLUMN]
             idx += ROWS_PER_COLUMN
             right_rows = rows[idx: idx + ROWS_PER_COLUMN]
             idx += ROWS_PER_COLUMN
 
-            if self.show_name_in_print:
-                header_line = (" " * 5).join([
-                    headings[0].ljust(col_widths[0]),
-                    headings[1].ljust(col_widths[1]),
-                    headings[2].rjust(col_widths[2])
-                ])
-            else:
-                header_line = (" " * 5).join([
-                    headings[0].ljust(col_widths[0]),
-                    headings[2].rjust(col_widths[2])
-                ])
-            separator_line = "-" * len(header_line)
-            full_width = len(header_line + gap + header_line)
+            full_width = len(header + gap + header)
 
             page_lines = [
-                *[line.center(full_width) for line in title_lines],
+                "Dug Hill Rod & Gun Club".center(full_width),
+                "Meeting Attendance Report".center(full_width),
+                f"Timeframe: {self.month_var.get()}".center(full_width),
                 f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}".center(full_width),
                 "",
-                header_line + gap + header_line,
-                separator_line + gap + separator_line
+                header + gap + header,
+                separator + gap + separator,
             ]
 
-            max_rows = max(len(left_rows), len(right_rows))
-            for i in range(max_rows):
-                # Left column
-                if i < len(left_rows):
-                    left = left_rows[i]
-                    if self.show_name_in_print:
-                        left_line = (" " * 5).join([
-                            str(truncate(left[0], col_widths[0])).ljust(col_widths[0]),
-                            str(truncate(left[1], col_widths[1])).ljust(col_widths[1]),
-                            str(truncate(left[2], col_widths[2])).rjust(col_widths[2])
-                        ])
-                    else:
-                        left_line = (" " * 5).join([
-                            str(truncate(left[0], col_widths[0])).ljust(col_widths[0]),
-                            str(truncate(left[2], col_widths[2])).rjust(col_widths[2])
-                        ])
-                else:
-                    left_line = " " * len(header_line)
-
-                # Right column
-                if i < len(right_rows):
-                    right = right_rows[i]
-                    if self.show_name_in_print:
-                        right_line = (" " * 5).join([
-                            str(truncate(right[0], col_widths[0])).ljust(col_widths[0]),
-                            str(truncate(right[1], col_widths[1])).ljust(col_widths[1]),
-                            str(truncate(right[2], col_widths[2])).rjust(col_widths[2])
-                        ])
-                    else:
-                        right_line = (" " * 5).join([
-                            str(truncate(right[0], col_widths[0])).ljust(col_widths[0]),
-                            str(truncate(right[2], col_widths[2])).rjust(col_widths[2])
-                        ])
-                else:
-                    right_line = " " * len(header_line)
-
-                page_lines.append(left_line + gap + right_line)
+            for i in range(max(len(left_rows), len(right_rows))):
+                left = format_row(left_rows[i]) if i < len(left_rows) else " " * len(header)
+                right = format_row(right_rows[i]) if i < len(right_rows) else " " * len(header)
+                page_lines.append(left + gap + right)
 
             pages.append(page_lines)
 
         total_pages = len(pages)
         report_text = ""
-        for i, page_lines in enumerate(pages):
-            page_lines.append("")
-            page_lines.append(f"Page {i + 1} of {total_pages}".center(full_width))
-            page_lines.append("End of Report".center(full_width))
-            report_text += "\n".join(page_lines) + "\n\n"
+        for i, lines in enumerate(pages):
+            lines.append("")
+            lines.append(f"Page {i+1} of {total_pages}".center(full_width))
+            lines.append("End of Report".center(full_width))
+            report_text += "\n".join(lines) + "\n\n"
 
         preview = tk.Toplevel(self)
         preview.title("Print Preview")

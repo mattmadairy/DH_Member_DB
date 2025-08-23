@@ -194,18 +194,20 @@ class MemberForm:
         self.att_tree.column("attended", width=80, anchor="center")
         self.att_tree.column("notes", width=200, anchor="w")
 
-        self.att_tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
+        self.att_tree.grid(row=0, column=0, columnspan=5, sticky="nsew", padx=5, pady=5)
 
         self.att_date_var = tk.StringVar(value=datetime.now().strftime("%m/%d/%Y"))
         self.att_attended_var = tk.IntVar(value=1)
         self.att_notes_var = tk.StringVar()
+        self.att_exemption_var = tk.IntVar(value=0)  # Exemption checkbox
 
         ttk.Label(self.tab_attendance, text="Date").grid(row=1, column=0, sticky="e", padx=5, pady=2)
         ttk.Entry(self.tab_attendance, textvariable=self.att_date_var, width=12).grid(row=1, column=1, padx=5, pady=2)
         ttk.Label(self.tab_attendance, text="Attended").grid(row=1, column=2, sticky="e", padx=5, pady=2)
         ttk.Checkbutton(self.tab_attendance, variable=self.att_attended_var).grid(row=1, column=3, sticky="w", padx=5, pady=2)
+        ttk.Checkbutton(self.tab_attendance, text="Exemption granted", variable=self.att_exemption_var).grid(row=1, column=4, sticky="w", padx=5, pady=2)
         ttk.Label(self.tab_attendance, text="Notes").grid(row=2, column=0, sticky="e", padx=5, pady=2)
-        ttk.Entry(self.tab_attendance, textvariable=self.att_notes_var, width=25).grid(row=2, column=1, columnspan=3, padx=5, pady=2)
+        ttk.Entry(self.tab_attendance, textvariable=self.att_notes_var, width=25).grid(row=2, column=1, columnspan=4, padx=5, pady=2)
 
         ttk.Button(self.tab_attendance, text="Add Entry", command=self.add_attendance).grid(row=3, column=0, pady=5)
         ttk.Button(self.tab_attendance, text="Edit Entry", command=self.edit_attendance).grid(row=3, column=1, pady=5)
@@ -224,7 +226,7 @@ class MemberForm:
         elif open_tab == "attendance":
             self.notebook.select(self.tab_attendance)
 
-    # --- Member ---
+    # --- Member Load/Save Methods ---
     def load_member(self):
         member = database.get_member_by_id(self.member_id)
         if member:
@@ -287,7 +289,7 @@ class MemberForm:
                                           self.sponsor_var.get(), self.card_internal_var.get(),
                                           self.card_external_var.get())
 
-    # --- Dues Tab ---
+    # --- Dues Tab Methods ---
     def load_dues_history(self):
         if not self.member_id:
             return
@@ -346,25 +348,29 @@ class MemberForm:
         ttk.Entry(popup, textvariable=method_var, width=12).grid(row=3, column=1)
         ttk.Label(popup, text="Notes").grid(row=4, column=0)
         ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=4, column=1)
-        def save_changes():
-            database.update_dues_payment(payment_id, float(amount_var.get()), date_var.get(),
-                                         method_var.get() or None, notes_var.get() or None,
-                                         year_var.get())
-            popup.destroy()
+
+        def save_edit():
+            try:
+                amt = float(amount_var.get())
+            except ValueError:
+                messagebox.showerror("Invalid Amount", "Amount must be numeric.")
+                return
+            database.update_dues(payment_id, amt, date_var.get(), method_var.get(), notes_var.get(), year_var.get())
             self.load_dues_history()
-        ttk.Button(popup, text="Save", command=save_changes).grid(row=5, column=0, columnspan=2)
-        popup.bind("<Return>", lambda e: save_changes())
+            popup.destroy()
+
+        ttk.Button(popup, text="Save", command=save_edit).grid(row=5, column=0, columnspan=2, pady=5)
 
     def delete_dues_payment(self):
         selected = self.dues_tree.selection()
         if not selected:
             return
         payment_id = int(selected[0])
-        if messagebox.askyesno("Confirm", "Delete selected payment?"):
-            database.delete_dues_payment(payment_id)
+        if messagebox.askyesno("Confirm Delete", "Delete this payment?"):
+            database.delete_dues(payment_id)
             self.load_dues_history()
 
-    # --- Work Hours Tab ---
+    # --- Work Hours Methods ---
     def load_work_hours(self):
         if not self.member_id:
             return
@@ -372,26 +378,22 @@ class MemberForm:
             self.wh_tree.delete(row)
         records = database.get_work_hours_by_member(self.member_id)
         for record in records:
-            self.wh_tree.insert("", "end", iid=record[0], values=(
-                record[2],
-                record[4] or "",
-                record[3],
-                record[5] or ""
-            ))
+            self.wh_tree.insert("", "end", iid=record[0], values=(record[2], record[3], record[4], record[5] or ""))
 
     def add_work_hours(self):
         if not self.member_id:
+            messagebox.showerror("Error", "Save member first before adding work hours.")
             return
-        database.add_work_hours(self.member_id, self.wh_date_var.get(),
-                                float(self.wh_hours_var.get()), self.wh_type_var.get() or None,
-                                self.wh_notes_var.get() or None)
+        try:
+            hrs = float(self.wh_hours_var.get())
+        except ValueError:
+            messagebox.showerror("Invalid Hours", "Hours must be numeric.")
+            return
+        database.add_work_hours(self.member_id, self.wh_date_var.get(), self.wh_type_var.get(),
+                                hrs, self.wh_notes_var.get())
         self.load_work_hours()
         self.wh_hours_var.set("")
-        self.wh_type_var.set("")
         self.wh_notes_var.set("")
-        
-        if self.on_hours_changed:
-            self.on_hours_changed()
 
     def edit_work_hours(self):
         selected = self.wh_tree.selection()
@@ -405,107 +407,194 @@ class MemberForm:
         popup.title("Edit Work Hours")
         popup.grab_set()
         date_var = tk.StringVar(value=record[2])
-        type_var = tk.StringVar(value=record[4] or "")
-        hours_var = tk.StringVar(value=str(record[3]))
+        type_var = tk.StringVar(value=record[3])
+        hours_var = tk.StringVar(value=str(record[4]))
         notes_var = tk.StringVar(value=record[5] or "")
         ttk.Label(popup, text="Date").grid(row=0, column=0)
         ttk.Entry(popup, textvariable=date_var, width=12).grid(row=0, column=1)
-        ttk.Label(popup, text="Work Type").grid(row=1, column=0)
+        ttk.Label(popup, text="Type").grid(row=1, column=0)
         ttk.Entry(popup, textvariable=type_var, width=20).grid(row=1, column=1)
         ttk.Label(popup, text="Hours").grid(row=2, column=0)
         ttk.Entry(popup, textvariable=hours_var, width=6).grid(row=2, column=1)
         ttk.Label(popup, text="Notes").grid(row=3, column=0)
         ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=3, column=1)
-        def save_changes():
-            database.update_work_hours(wh_id, date_var.get(), float(hours_var.get()),
-                                       type_var.get() or None, notes_var.get() or None)
-            popup.destroy()
-            self.load_work_hours()
-            
-            if self.on_hours_changed:
-                self.on_hours_changed()
 
-        ttk.Button(popup, text="Save", command=save_changes).grid(row=4, column=0, columnspan=2)
-        popup.bind("<Return>", lambda e: save_changes())
+        def save_edit():
+            try:
+                hrs = float(hours_var.get())
+            except ValueError:
+                messagebox.showerror("Invalid Hours", "Hours must be numeric.")
+                return
+            database.update_work_hours(wh_id, date_var.get(), type_var.get(), hrs, notes_var.get())
+            self.load_work_hours()
+            popup.destroy()
+
+        ttk.Button(popup, text="Save", command=save_edit).grid(row=4, column=0, columnspan=2, pady=5)
 
     def delete_work_hours(self):
         selected = self.wh_tree.selection()
         if not selected:
             return
         wh_id = int(selected[0])
-        if messagebox.askyesno("Confirm", "Delete selected work hour entry?"):
+        if messagebox.askyesno("Confirm Delete", "Delete this work hours entry?"):
             database.delete_work_hours(wh_id)
             self.load_work_hours()
-            
-        if self.on_hours_changed:
-            self.on_hours_changed()
 
     # --- Attendance Methods ---
+    # --- Attendance Methods ---
     def load_attendance(self):
-        if not self.member_id:
-            return
-        for row in self.att_tree.get_children():
-            self.att_tree.delete(row)
-        records = database.get_meeting_attendance(self.member_id)
-        for record in records:
-            self.att_tree.insert("", "end", iid=record[0], values=(
-                record[2],
-                "Yes" if record[3] else "No",
-                record[4] or ""
-            ))
+        """
+        Load meeting attendance for this member into the UI.
+        Each row will have mutually exclusive Attended / Exemption checkboxes.
+        """
+        import tkinter as tk
+
+        # Clear previous rows
+        for widget in getattr(self, 'attendance_frame', []):
+            widget.destroy()
+        if not hasattr(self, 'attendance_frame'):
+            self.attendance_frame = tk.Frame(self.tab_attendance)
+            self.attendance_frame.grid(row=5, column=0, columnspan=5, sticky="nsew", pady=5)
+
+        self.attendance_vars = []  # Store (row_id, attended_var, exemption_var)
+
+        # Fetch attendance records
+        records = database.get_meeting_attendance(member_id=self.member_id)
+
+        for idx, record in enumerate(records):
+            row_id = record[0]
+            meeting_date = record[2]
+            attended_val = record[3]
+            exemption_val = getattr(record, 'exemption', 0) if hasattr(record, 'exemption') else 0
+
+            row_frame = tk.Frame(self.attendance_frame)
+            row_frame.pack(fill='x', pady=2)
+
+            tk.Label(row_frame, text=meeting_date, width=12, anchor='w').pack(side='left', padx=5)
+
+            attended_var = tk.IntVar(value=attended_val)
+            exemption_var = tk.IntVar(value=exemption_val)
+
+            # Mutual exclusivity and require one checked
+            def make_callback(av, ev, rid=row_id):
+                def callback():
+                    if av.get() and ev.get():
+                        # If both checked, uncheck the other
+                        ev.set(0)
+                    elif not av.get() and not ev.get():
+                        # If both unchecked, default to Attended
+                        av.set(1)
+                    # Update DB immediately
+                    database.update_meeting_attendance(
+                        rid,
+                        attended=attended_var.get(),
+                        notes=None,
+                        exemption=exemption_var.get()
+                    )
+                return callback
+
+            attended_cb = tk.Checkbutton(row_frame, text="Attended",
+                                        variable=attended_var,
+                                        command=make_callback(attended_var, exemption_var))
+            exemption_cb = tk.Checkbutton(row_frame, text="Exemption",
+                                        variable=exemption_var,
+                                        command=make_callback(exemption_var, attended_var))
+
+            attended_cb.pack(side='left', padx=5)
+            exemption_cb.pack(side='left', padx=5)
+
+            self.attendance_vars.append((row_id, attended_var, exemption_var))
+
 
     def add_attendance(self):
         if not self.member_id:
+            messagebox.showerror("Error", "Save member first before adding attendance.")
             return
+
+        attended = bool(self.att_attended_var.get())
+        exemption = bool(self.att_exemption_var.get())
+
+        # Ensure at least one checked
+        if not (attended or exemption):
+            attended = True
+            self.att_attended_var.set(1)
+
         database.add_meeting_attendance(
             self.member_id,
             self.att_date_var.get(),
-            self.att_attended_var.get(),
-            self.att_notes_var.get() or None
+            attended,
+            self.att_notes_var.get(),
+            exemption
         )
-        self.load_attendance()
+
         self.att_notes_var.set("")
         self.att_attended_var.set(1)
+        self.att_exemption_var.set(0)
+
+        self.load_attendance()
+
 
     def edit_attendance(self):
         selected = self.att_tree.selection()
         if not selected:
             return
         att_id = int(selected[0])
-        records = database.get_meeting_attendance(self.member_id)
-        record = [r for r in records if r[0]==att_id][0]
+        records = database.get_meeting_attendance(member_id=self.member_id)
+        record = next((r for r in records if r[0] == att_id), None)
+        if not record:
+            return
 
         popup = tk.Toplevel(self.top)
         popup.title("Edit Attendance")
         popup.grab_set()
 
         date_var = tk.StringVar(value=record[2])
-        attended_var = tk.IntVar(value=record[3])
+        attended_var = tk.IntVar(value=1 if record[3] else 0)
         notes_var = tk.StringVar(value=record[4] or "")
+        exemption_var = tk.IntVar(value=1 if getattr(record, 'exemption', 0) else 0)
 
         ttk.Label(popup, text="Date").grid(row=0, column=0)
         ttk.Entry(popup, textvariable=date_var, width=12).grid(row=0, column=1)
-        ttk.Label(popup, text="Attended").grid(row=1, column=0)
-        ttk.Checkbutton(popup, variable=attended_var).grid(row=1, column=1)
-        ttk.Label(popup, text="Notes").grid(row=2, column=0)
-        ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=2, column=1)
 
-        def save_changes():
-            database.update_meeting_attendance(att_id,
-                                               meeting_date=date_var.get(),
-                                               attended=attended_var.get(),
-                                               notes=notes_var.get() or None)
-            popup.destroy()
+        def toggle_attended():
+            if attended_var.get() and exemption_var.get():
+                exemption_var.set(0)
+            elif not attended_var.get() and not exemption_var.get():
+                attended_var.set(1)
+
+        def toggle_exemption():
+            if attended_var.get() and exemption_var.get():
+                attended_var.set(0)
+            elif not attended_var.get() and not exemption_var.get():
+                attended_var.set(1)
+
+        ttk.Checkbutton(popup, text="Attended", variable=attended_var, command=toggle_attended).grid(row=1, column=0, columnspan=2)
+        ttk.Checkbutton(popup, text="Exemption granted", variable=exemption_var, command=toggle_exemption).grid(row=2, column=0, columnspan=2)
+
+        ttk.Label(popup, text="Notes").grid(row=3, column=0)
+        ttk.Entry(popup, textvariable=notes_var, width=25).grid(row=3, column=1)
+
+        def save_edit():
+            if not (attended_var.get() or exemption_var.get()):
+                attended_var.set(1)
+            database.update_meeting_attendance(
+                att_id,
+                date_var.get(),
+                bool(attended_var.get()),
+                notes_var.get(),
+                bool(exemption_var.get())
+            )
             self.load_attendance()
+            popup.destroy()
 
-        ttk.Button(popup, text="Save", command=save_changes).grid(row=3, column=0, columnspan=2)
-        popup.bind("<Return>", lambda e: save_changes())
+        ttk.Button(popup, text="Save", command=save_edit).grid(row=4, column=0, columnspan=2, pady=5)
+
 
     def delete_attendance(self):
         selected = self.att_tree.selection()
         if not selected:
             return
         att_id = int(selected[0])
-        if messagebox.askyesno("Confirm", "Delete selected attendance?"):
+        if messagebox.askyesno("Confirm Delete", "Delete this attendance entry?"):
             database.delete_meeting_attendance(att_id)
             self.load_attendance()
