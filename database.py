@@ -4,13 +4,16 @@ from contextlib import closing
 
 DB_NAME = "members.db"
 
+conn = None
+
+
 def get_connection():
     return sqlite3.connect(DB_NAME)
 
 def connect_db():
     global conn
     if conn is None:
-        conn = sqlite3.connect("your_database_name.db")  # Make sure to replace with your database path
+        conn = sqlite3.connect("members.db")  # Make sure to replace with your database path
     return conn 
 
 # ------------------ Initialization ----------------- #

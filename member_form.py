@@ -1,4 +1,3 @@
-# member_form.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
@@ -24,55 +23,14 @@ class DataTab:
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(0, weight=1)
 
-        # Treeview
         self.tree = ttk.Treeview(parent, columns=columns, show="headings")
         for col in columns:
-            self.tree.heading(col, text=col.title())
+            self.tree.heading(col, text=col)
             self.tree.column(col, width=120, anchor="w")
         self.tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
         self.tree.bind("<Double-1>", self.edit_record)
 
-        # Entry frame
-        self.entry_frame = ttk.Frame(parent)
-        self.entry_frame.grid(row=1, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
-        self._build_entries()
-
-        # Buttons
-        btns = ttk.Frame(parent)
-        btns.grid(row=2, column=0, columnspan=4, sticky="w", padx=5, pady=5)
-        ttk.Button(btns, text="Add Entry", command=self.add_entry).pack(side="left", padx=4)
-        ttk.Button(btns, text="Delete Entry", command=self.delete_entry).pack(side="left", padx=4)
-
         self.member_id = None
-
-    def _validate_float(self, value):
-        if value == "" or value == ".":
-            return True
-        try:
-            float(value)
-            return True
-        except ValueError:
-            return False
-
-    def _build_entries(self):
-        for i, field in enumerate(self.entry_fields):
-            if len(field) == 2:
-                label, var = field
-                opts = {}
-            else:
-                label, var, opts = field
-
-            ttk.Label(self.entry_frame, text=label).grid(row=i, column=0, sticky="e", padx=5, pady=2)
-
-            if opts.get("widget") == "combobox":
-                cb = ttk.Combobox(self.entry_frame, textvariable=var, values=opts.get("values", []), state="readonly")
-                cb.grid(row=i, column=1, sticky="w", padx=5, pady=2)
-            else:
-                ent = ttk.Entry(self.entry_frame, textvariable=var)
-                if label.lower() == "hours":
-                    vcmd = (self.entry_frame.register(self._validate_float), "%P")
-                    ent.configure(validate="key", validatecommand=vcmd)
-                ent.grid(row=i, column=1, sticky="w", padx=5, pady=2)
 
     def load_records(self, member_id):
         self.member_id = member_id
@@ -83,67 +41,6 @@ class DataTab:
             values = self.row_adapter(r)
             self.tree.insert("", "end", iid=r[0], values=values)
 
-    def _collect_values_from_entries(self):
-        values = []
-        for field in self.entry_fields:
-            values.append(field[1].get())
-        return values
-
-    def _validate_required(self):
-        for field in self.entry_fields:
-            if len(field) == 3:
-                label, var, opts = field
-                if opts.get("required") and not str(var.get()).strip():
-                    messagebox.showerror("Missing Required Field", f"'{label}' is required.")
-                    return False
-        return True
-
-    def add_entry(self):
-        if not self.member_id:
-            return
-        if not self._validate_required():
-            return
-
-        values = self._collect_values_from_entries()
-        try:
-            self.db_add_func(self.member_id, *values)
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            return
-
-        self.load_records(self.member_id)
-        self._reset_inputs()
-
-    def _reset_inputs(self):
-        today = datetime.today().strftime(DATE_FMT)
-        default_year = str(database.get_default_year())
-
-        for field in self.entry_fields:
-            label, var = field[0], field[1]
-            if label.lower() == "date":
-                var.set(today)
-            elif label.lower() == "year":
-                var.set(default_year)
-            else:
-                if len(field) == 3 and field[2].get("widget") == "combobox":
-                    var.set("")
-                else:
-                    var.set("")
-
-    def delete_entry(self):
-        selected = self.tree.selection()
-        if not selected:
-            return
-        entry_id = selected[0]
-        if not self.tree.exists(entry_id):
-            return
-        if messagebox.askyesno("Delete Entry", "Delete this entry?"):
-            try:
-                self.db_delete_func(int(entry_id))
-                self.load_records(self.member_id)
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
-
     def edit_record(self, event):
         selected = self.tree.selection()
         if not selected:
@@ -153,37 +50,22 @@ class DataTab:
 
         popup = tk.Toplevel(self.parent)
         popup.title("Edit Entry")
-
         editors = []
         for i, field in enumerate(self.entry_fields):
-            if len(field) == 2:
-                label, _var = field
-                opts = {}
-            else:
-                label, _var, opts = field
-
+            label = field[0]
+            opts = field[2] if len(field) == 3 else {}
             ttk.Label(popup, text=label).grid(row=i, column=0, padx=5, pady=3, sticky="e")
 
+            new_var = tk.StringVar(value=current_values[i])
             if opts.get("widget") == "combobox":
-                new_var = tk.StringVar(value=current_values[i])
                 w = ttk.Combobox(popup, textvariable=new_var, values=opts.get("values", []), state="readonly")
-                w.grid(row=i, column=1, padx=5, pady=3, sticky="w")
             else:
-                new_var = tk.StringVar(value=current_values[i])
                 w = ttk.Entry(popup, textvariable=new_var)
-                if label.lower() == "hours":
-                    vcmd = (popup.register(self._validate_float), "%P")
-                    w.configure(validate="key", validatecommand=vcmd)
-                w.grid(row=i, column=1, padx=5, pady=3, sticky="w")
-
+            w.grid(row=i, column=1, padx=5, pady=3, sticky="w")
             editors.append(new_var)
 
         def save():
             new_vals = [v.get() for v in editors]
-            for j, field in enumerate(self.entry_fields):
-                if len(field) == 3 and field[2].get("required") and not str(new_vals[j]).strip():
-                    messagebox.showerror("Missing Required Field", f"'{field[0]}' is required.")
-                    return
             try:
                 self.db_update_func(row_id, *new_vals)
                 self.load_records(self.member_id)
@@ -191,20 +73,21 @@ class DataTab:
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
-        ttk.Button(popup, text="Save", command=save).grid(row=len(self.entry_fields), column=0, columnspan=2, pady=8)
+        ttk.Button(popup, text="Save", command=save).grid(row=len(self.entry_fields), column=0, pady=8)
+        ttk.Button(popup, text="Cancel", command=popup.destroy).grid(row=len(self.entry_fields), column=1, pady=8)
 
 
 class MemberForm:
-    def __init__(self, parent, member_id=None, on_save_callback=None, open_tab=None):
+    def __init__(self, parent, member_id=None, on_save_callback=None):
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
         self.member_id = member_id
         self.on_save_callback = on_save_callback
-        self.top.bind("<Return>", lambda e: self.save_member())
 
         self.notebook = ttk.Notebook(self.top)
-        self.notebook.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.notebook.pack(fill="both", expand=True)
 
+        # Tabs
         self.tab_basic = ttk.Frame(self.notebook)
         self.tab_contact = ttk.Frame(self.notebook)
         self.tab_membership = ttk.Frame(self.notebook)
@@ -219,7 +102,7 @@ class MemberForm:
         self.notebook.add(self.tab_work_hours, text="Work Hours")
         self.notebook.add(self.tab_attendance, text="Meeting Attendance")
 
-        # --- Form Variables ---
+        # Variables
         self.badge_number_var = tk.StringVar()
         self.membership_type_var = tk.StringVar()
         self.first_name_var = tk.StringVar()
@@ -239,182 +122,229 @@ class MemberForm:
 
         self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
 
-        self._build_fields()
+        # Display label storage
+        self._display_labels = {}
 
-        ttk.Button(self.tab_basic, text="Save", command=self.save_basic_info).grid(row=5, column=0, pady=5)
-        ttk.Button(self.tab_contact, text="Save", command=self.save_contact).grid(row=10, column=0, pady=5)
-        ttk.Button(self.tab_membership, text="Save", command=self.save_membership_info).grid(row=10, column=0, pady=5)
+        # Build read-only tabs
+        self._build_read_only_tab(self.tab_basic, [
+            ("First Name", self.first_name_var),
+            ("Last Name", self.last_name_var),
+            ("Date of Birth", self.dob_var)
+        ], self._edit_basic, "basic")
 
-        # --- Dues Tab (UI order: Date, Year, Amount, Method, Notes) ---
-        # --- Dues Tab (UI order: Date, Year, Amount, Method, Notes) ---
-        self.dues_date_var = tk.StringVar(value=datetime.today().strftime(DATE_FMT))
-        self.dues_year_var = tk.StringVar(value=str(database.get_default_year()))
-        self.dues_amount_var = tk.StringVar()
-        self.dues_method_var = tk.StringVar()
-        self.dues_notes_var = tk.StringVar()
+        self._build_read_only_tab(self.tab_contact, [
+            ("Email Address", self.email_var),
+            ("Email Address 2", self.email2_var),
+            ("Phone Number", self.phone_var),
+            ("Address", self.address_var),
+            ("City", self.city_var),
+            ("State", self.state_var),
+            ("Zip Code", self.zip_var)
+        ], self._edit_contact, "contact")
 
+        self._build_read_only_tab(self.tab_membership, [
+            ("Badge Number", self.badge_number_var),
+            ("Membership Type", self.membership_type_var),
+            ("Join Date", self.join_date_var),
+            ("Sponsor", self.sponsor_var),
+            ("Card/Fob Internal Number", self.card_internal_var),
+            ("Card/Fob External Number", self.card_external_var)
+        ], self._edit_membership, "membership")
+
+        # DataTabs
         self.dues_tab = DataTab(
             self.tab_dues,
-            columns=["date", "year", "amount", "method", "notes"],  # Treeview columns
+            columns=["Date", "Amount", "Method", "Notes", "Year"],
             db_load_func=database.get_dues_by_member,
-            db_add_func=lambda member_id, date, year, amount, method, notes:
-                database.add_dues_payment(member_id, float(amount), date, method or None, notes or None, year),
-            db_update_func=lambda row_id, date, year, amount, method, notes:
-                database.update_dues_payment(
-                    row_id,
-                    amount=float(amount),
-                    payment_date=date,
-                    method=(method or None),
-                    notes=(notes or None),
-                    year=year
-                ),
+            db_add_func=database.add_dues_payment,
+            db_update_func=database.update_dues_payment,
             db_delete_func=database.delete_dues_payment,
             entry_fields=[
-                ("Date", self.dues_date_var),
-                ("Year", self.dues_year_var),
-                ("Amount", self.dues_amount_var),
-                ("Method", self.dues_method_var, {"widget": "combobox", "values": METHOD_OPTIONS}),
-                ("Notes", self.dues_notes_var)
+                ("Date", tk.StringVar()),
+                ("Amount", tk.StringVar()),
+                ("Method", tk.StringVar(), {"widget": "combobox", "values": METHOD_OPTIONS}),
+                ("Notes", tk.StringVar()),
+                ("Year", tk.StringVar())
             ],
-            row_adapter=lambda r: [
-                r[3],                 # Date
-                r[4],                 # Year
-                f"{(r[2] or 0):.2f}", # Amount
-                r[5] or "",           # Method
-                r[6] or ""            # Notes
-            ]
+            row_adapter=lambda r: [r[3], f"{r[2]:.2f}", r[5] or "", r[6] or "", r[4]]
         )
 
-
-        # --- Work Hours Tab ---
-        self.wh_date_var = tk.StringVar(value=datetime.today().strftime(DATE_FMT))
-        self.wh_type_var = tk.StringVar()
-        self.wh_hours_var = tk.StringVar()
-        self.wh_notes_var = tk.StringVar()
-
-        self.work_hours_tab = DataTab(
+        self.work_tab = DataTab(
             self.tab_work_hours,
-            columns=["date", "type", "hours", "notes"],
+            columns=["Date", "Hours", "Type", "Notes"],
             db_load_func=database.get_work_hours_by_member,
-            db_add_func=lambda member_id, date, type_, hours, notes:
-                database.add_work_hours(member_id, date, float(hours), type_ or None, notes or None),
-            db_update_func=lambda row_id, date, type_, hours, notes:
-                database.update_work_hours(row_id, date=date, work_type=type_ or None,
-                                           hours=float(hours), notes=notes or None),
+            db_add_func=database.add_work_hours,
+            db_update_func=database.update_work_hours,
             db_delete_func=database.delete_work_hours,
             entry_fields=[
-                ("Date", self.wh_date_var),
-                ("Type", self.wh_type_var),
-                ("Hours", self.wh_hours_var),
-                ("Notes", self.wh_notes_var)
+                ("Date", tk.StringVar()),
+                ("Hours", tk.StringVar()),
+                ("Type", tk.StringVar()),
+                ("Notes", tk.StringVar())
             ],
-            row_adapter=lambda r: (r[2], r[4] or "", f"{float(r[3] or 0):.2f}", r[5] or "")
+            row_adapter=lambda r: [r[2], f"{r[3]:.2f}", r[4] or "", r[5] or ""]
         )
-
-        # --- Attendance Tab ---
-        self.att_date_var = tk.StringVar(value=datetime.today().strftime(DATE_FMT))
-        self.att_status_var = tk.StringVar(value="")
-        self.att_notes_var = tk.StringVar()
 
         self.attendance_tab = DataTab(
             self.tab_attendance,
-            columns=["date", "status", "notes"],
+            columns=["Date", "Status", "Notes"],
             db_load_func=database.get_meeting_attendance,
-            db_add_func=lambda member_id, date, status, notes:
-                database.add_meeting_attendance(member_id, date, status, notes or None),
-            db_update_func=lambda row_id, date, status, notes:
-                database.update_meeting_attendance(row_id, meeting_date=date, status=status, notes=notes or None),
+            db_add_func=database.add_meeting_attendance,
+            db_update_func=database.update_meeting_attendance,
             db_delete_func=database.delete_meeting_attendance,
             entry_fields=[
-                ("Date", self.att_date_var),
-                ("Status", self.att_status_var, {"widget": "combobox", "values": STATUS_OPTIONS, "required": True}),
-                ("Notes", self.att_notes_var)
+                ("Date", tk.StringVar()),
+                ("Status", tk.StringVar(), {"widget": "combobox", "values": STATUS_OPTIONS}),
+                ("Notes", tk.StringVar())
             ],
             row_adapter=lambda r: [r[2], r[3], r[4] or ""]
         )
 
-        # Load data
+        # Load member data
         if self.member_id:
-            self.load_member()
-            self.dues_tab.load_records(self.member_id)
-            self.work_hours_tab.load_records(self.member_id)
-            self.attendance_tab.load_records(self.member_id)
+            self._load_member_data()
 
-        if open_tab == "dues":
-            self.notebook.select(self.tab_dues)
-        elif open_tab == "work_hours":
-            self.notebook.select(self.tab_work_hours)
-        elif open_tab == "attendance":
-            self.notebook.select(self.tab_attendance)
+    def _build_read_only_tab(self, tab, fields, edit_callback, tab_key):
+        self._display_labels[tab_key] = {}
+        for idx, (label_text, var) in enumerate(fields):
+            ttk.Label(tab, text=label_text + ":").grid(row=idx, column=0, sticky="e", padx=5, pady=2)
+            lbl = ttk.Label(tab, text=var.get())
+            lbl.grid(row=idx, column=1, sticky="w", padx=5, pady=2)
+            self._display_labels[tab_key][label_text] = (lbl, var)
+        ttk.Button(tab, text="Edit", command=edit_callback).grid(row=len(fields), column=0, columnspan=2, pady=10)
 
-    def _build_fields(self):
-        fields_basic = [("First Name", self.first_name_var),
-                        ("Last Name", self.last_name_var),
-                        ("Date of Birth", self.dob_var)]
-        fields_contact = [("Email Address", self.email_var),
-                          ("Email Address 2", self.email2_var),
-                          ("Phone Number", self.phone_var),
-                          ("Address", self.address_var),
-                          ("City", self.city_var),
-                          ("State", self.state_var),
-                          ("Zip Code", self.zip_var)]
-        fields_membership = [("Badge Number", self.badge_number_var),
-                             ("Membership Type", self.membership_type_var),
-                             ("Join Date", self.join_date_var),
-                             ("Sponsor", self.sponsor_var),
-                             ("Card/Fob Internal Number", self.card_internal_var),
-                             ("Card/Fob External Number", self.card_external_var)]
-
-        def build_fields(frame, fields):
-            for idx, (label, var) in enumerate(fields):
-                ttk.Label(frame, text=label).grid(row=idx, column=0, sticky="e", padx=5, pady=2)
-                if label == "Membership Type":
-                    ttk.Combobox(frame, textvariable=var, values=self.membership_types, state="readonly")\
-                        .grid(row=idx, column=1, sticky="w", padx=5, pady=2)
-                else:
-                    ttk.Entry(frame, textvariable=var).grid(row=idx, column=1, sticky="w", padx=5, pady=2)
-
-        build_fields(self.tab_basic, fields_basic)
-        build_fields(self.tab_contact, fields_contact)
-        build_fields(self.tab_membership, fields_membership)
-
-    def load_member(self):
+    def _load_member_data(self):
+        if not self.member_id:
+            return
         m = database.get_member_by_id(self.member_id)
         if not m:
             return
-        (id_, badge, memtype, first, last, dob, email, phone, address, city, state,
-         zipc, join, email2, sponsor, int_card, ext_card) = m[:17]
-        self.badge_number_var.set(badge or "")
-        self.membership_type_var.set(memtype or "")
-        self.first_name_var.set(first or "")
-        self.last_name_var.set(last or "")
-        self.dob_var.set(dob or "")
-        self.email_var.set(email or "")
-        self.phone_var.set(phone or "")
-        self.address_var.set(address or "")
-        self.city_var.set(city or "")
-        self.state_var.set(state or "")
-        self.zip_var.set(zipc or "")
-        self.join_date_var.set(join or "")
-        self.email2_var.set(email2 or "")
-        self.sponsor_var.set(sponsor or "")
-        self.card_internal_var.set(int_card or "")
-        self.card_external_var.set(ext_card or "")
 
-    def save_member(self):
-        data = (self.badge_number_var.get(), self.membership_type_var.get(),
-                self.first_name_var.get(), self.last_name_var.get(), self.dob_var.get(),
-                self.email_var.get(), self.phone_var.get(), self.address_var.get(), self.city_var.get(),
-                self.state_var.get(), self.zip_var.get(), self.join_date_var.get(),
-                self.email2_var.get(), self.sponsor_var.get(), self.card_internal_var.get(), self.card_external_var.get())
-        if self.member_id:
-            database.update_member(self.member_id, data)
-        else:
-            self.member_id = database.add_member(data)
+        mapping = {
+            "badge_number": m[1],
+            "membership_type": m[2],
+            "first_name": m[3],
+            "last_name": m[4],
+            "dob": m[5],
+            "email": m[6],
+            "phone": m[7],
+            "address": m[8],
+            "city": m[9],
+            "state": m[10],
+            "zip": m[11],
+            "join_date": m[12],
+            "email2": m[13],
+            "sponsor": m[14],
+            "card_internal": m[15],
+            "card_external": m[16]
+        }
+
+        for var_name, value in mapping.items():
+            var = getattr(self, f"{var_name}_var", None)
+            if var:
+                # Format dates
+                if var_name in ("dob", "join_date") and value:
+                    try:
+                        dt = datetime.strptime(value, "%Y-%m-%d")
+                        var.set(dt.strftime("%m-%d-%Y"))
+                    except ValueError:
+                        var.set(value)
+                else:
+                    var.set(value or "")
+
+        # Update read-only labels
+        for tab_labels in self._display_labels.values():
+            for lbl, var in tab_labels.values():
+                lbl.config(text=var.get())
+
+        # Load DataTabs
+        self.dues_tab.load_records(self.member_id)
+        self.work_tab.load_records(self.member_id)
+        self.attendance_tab.load_records(self.member_id)
+
+
+    # Edit callbacks
+    def _edit_basic(self):
+        self._open_edit_popup("Basic Info", [
+            ("First Name", self.first_name_var),
+            ("Last Name", self.last_name_var),
+            ("Date of Birth", self.dob_var)
+        ], self._save_basic)
+
+    def _edit_contact(self):
+        self._open_edit_popup("Contact", [
+            ("Email Address", self.email_var),
+            ("Email Address 2", self.email2_var),
+            ("Phone Number", self.phone_var),
+            ("Address", self.address_var),
+            ("City", self.city_var),
+            ("State", self.state_var),
+            ("Zip Code", self.zip_var)
+        ], self._save_contact)
+
+    def _edit_membership(self):
+        self._open_edit_popup("Membership", [
+            ("Badge Number", self.badge_number_var),
+            ("Membership Type", self.membership_type_var),
+            ("Join Date", self.join_date_var),
+            ("Sponsor", self.sponsor_var),
+            ("Card/Fob Internal Number", self.card_internal_var),
+            ("Card/Fob External Number", self.card_external_var)
+        ], self._save_membership)
+
+    def _open_edit_popup(self, title, fields, save_callback):
+        popup = tk.Toplevel(self.top)
+        popup.title(f"Edit {title}")
+        editors = []
+        for i, (label_text, var) in enumerate(fields):
+            ttk.Label(popup, text=label_text).grid(row=i, column=0, padx=5, pady=3, sticky="e")
+            new_var = tk.StringVar(value=var.get())
+            if label_text == "Membership Type":
+                w = ttk.Combobox(popup, textvariable=new_var, values=self.membership_types, state="readonly")
+            else:
+                w = ttk.Entry(popup, textvariable=new_var)
+            w.grid(row=i, column=1, padx=5, pady=3, sticky="w")
+            editors.append((var, new_var))
+
+        def save():
+            for orig_var, new_var in editors:
+                orig_var.set(new_var.get())
+            save_callback()
+            popup.destroy()
+
+        ttk.Button(popup, text="Save", command=save).grid(row=len(fields), column=0, pady=8)
+        ttk.Button(popup, text="Cancel", command=popup.destroy).grid(row=len(fields), column=1, pady=8)
+
+    def _save_basic(self):
+        database.update_member_basic(self.member_id,
+                                     self.first_name_var.get(),
+                                     self.last_name_var.get(),
+                                     self.dob_var.get())
+        self._load_member_data()
         if self.on_save_callback:
-            self.on_save_callback(self.member_id, self.membership_type_var.get())
-        self.top.destroy()
+            self.on_save_callback(self.member_id)
 
-    def save_basic_info(self): self.save_member()
-    def save_contact(self): self.save_member()
-    def save_membership_info(self): self.save_member()
+    def _save_contact(self):
+        database.update_member_contact(self.member_id,
+                                       self.email_var.get(),
+                                       self.email2_var.get(),
+                                       self.phone_var.get(),
+                                       self.address_var.get(),
+                                       self.city_var.get(),
+                                       self.state_var.get(),
+                                       self.zip_var.get())
+        self._load_member_data()
+        if self.on_save_callback:
+            self.on_save_callback(self.member_id)
+
+    def _save_membership(self):
+        database.update_member_membership(self.member_id,
+                                          self.badge_number_var.get(),
+                                          self.membership_type_var.get(),
+                                          self.join_date_var.get(),
+                                          self.sponsor_var.get(),
+                                          self.card_internal_var.get(),
+                                          self.card_external_var.get())
+        self._load_member_data()
+        if self.on_save_callback:
+            self.on_save_callback(self.member_id)
