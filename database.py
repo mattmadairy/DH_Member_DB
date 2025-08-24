@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 from contextlib import closing
+import calendar
 
 DB_NAME = "members.db"
 
@@ -20,6 +21,14 @@ def get_db_connection():
     conn = sqlite3.connect('members.db')  # or use your database connection settings
     return conn
 
+def get_connection():
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        return conn
+    except sqlite3.Error as e:
+        print(f"Connection error: {e}")
+        return None
+    
 # ------------------ Initialization ----------------- #
 def init_members_table():
     conn = get_connection()
@@ -318,6 +327,52 @@ def get_dues_by_member(member_id):
     rows = c.fetchall()
     conn.close()
     return rows
+
+def get_dues_report(member_id=None, year=None, month=None):
+    """
+    Return a list of dues summary per member with individual payments.
+    Each row is: (member_id, badge_number, membership_type, first_name, last_name,
+                   total_due, payment_date, amount_paid, method)
+    Filters by optional member_id, year, and month.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    query = """
+        SELECT m.id, m.badge_number, m.membership_type, m.first_name, m.last_name,
+               d.amount as amount_due, d.payment_date, d.amount as amount_paid, d.method
+        FROM members m
+        LEFT JOIN dues d ON m.id = d.member_id
+        WHERE m.deleted = 0
+    """
+    params = []
+
+    if member_id:
+        query += " AND m.id = ?"
+        params.append(member_id)
+
+    if year:
+        query += " AND strftime('%Y', d.payment_date) = ?"
+        params.append(str(year))
+
+    if month and month != "All":
+        month_index = list(calendar.month_name).index(month)
+        query += " AND strftime('%m', d.payment_date) = ?"
+        params.append(f"{month_index:02d}")
+
+    query += " ORDER BY m.last_name, m.first_name, d.payment_date DESC"
+
+    try:
+        c.execute(query, params)
+        rows = c.fetchall()
+    except sqlite3.Error as e:
+        print(f"Query execution error: {e}")
+        rows = []
+
+    conn.close()
+    return rows
+
+
 
 def update_dues_payment(payment_id, amount=None, payment_date=None, method=None, notes=None, year=None):
     conn = get_connection()
@@ -631,3 +686,85 @@ def delete_meeting_attendance(entry_id):
     c.execute("DELETE FROM meeting_attendance WHERE id=?", (entry_id,))
     conn.commit()
     conn.close()
+
+
+# Using the standardized get_connection() in your report function
+def get_work_hours_report(member_id=None, start_date=None, end_date=None, work_type=None):
+    """
+    Return a list of (badge_number, first_name, last_name, total_hours)
+    for all members, optionally filtered by member_id, date range, and work type.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    query = """
+        SELECT m.badge_number, m.first_name, m.last_name,
+               IFNULL(SUM(w.hours), 0) as total_hours
+        FROM members m
+        LEFT JOIN work_hours w 
+               ON m.id = w.member_id
+    """
+
+    # Collect join filters separately (so they apply to w, but don't kill the LEFT JOIN)
+    join_filters = []
+    params = []
+
+    if start_date:
+        join_filters.append("w.date >= ?")
+        params.append(start_date)
+    if end_date:
+        join_filters.append("w.date <= ?")
+        params.append(end_date)
+    if work_type:
+        join_filters.append("w.work_type = ?")
+        params.append(work_type)
+
+    if join_filters:
+        query += " AND " + " AND ".join(join_filters)
+
+    query += " WHERE m.deleted = 0"
+
+    if member_id:
+        query += " AND m.id = ?"
+        params.append(member_id)
+
+    query += " GROUP BY m.id ORDER BY m.last_name, m.first_name"
+
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+def get_member_work_hours_for_year(member_id, year):
+    """
+    Return the total hours a member has logged in the given year.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT COALESCE(SUM(hours), 0)
+        FROM work_hours
+        WHERE member_id = ?
+          AND strftime('%Y', date) = ?
+    """, (member_id, str(year)))
+    total = cur.fetchone()[0]
+    conn.close()
+    return total
+
+
+def get_member_work_hours_for_month(member_id, year, month):
+    """
+    Return the total hours a member has logged in the given year/month.
+    `month` should be 1–12
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT COALESCE(SUM(hours), 0)
+        FROM work_hours
+        WHERE member_id = ?
+          AND strftime('%Y', date) = ?
+          AND strftime('%m', date) = ?
+    """, (member_id, str(year), f"{month:02d}"))
+    total = cur.fetchone()[0]
+    conn.close()
+    return total
