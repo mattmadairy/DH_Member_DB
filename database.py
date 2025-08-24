@@ -16,6 +16,10 @@ def connect_db():
         conn = sqlite3.connect("members.db")  # Make sure to replace with your database path
     return conn 
 
+def get_db_connection():
+    conn = sqlite3.connect('members.db')  # or use your database connection settings
+    return conn
+
 # ------------------ Initialization ----------------- #
 def init_members_table():
     conn = get_connection()
@@ -338,16 +342,17 @@ def delete_dues_payment(payment_id):
     conn.close()
 
 # ------------------ Work Hours ----------------- #
-def add_work_hours(member_id, date, hours, work_type=None, notes=None):
+def add_work_hours(member_id, date, hours, activity=None, notes=None):
     conn = get_connection()
     c = conn.cursor()
     # Ensure hours is float, even if text is passed
     c.execute("""
-        INSERT INTO work_hours (member_id, date, hours, work_type, notes)
+        INSERT INTO work_hours (member_id, date, hours, activity, notes)
         VALUES (?, ?, ?, ?, ?)
-    """, (member_id, date, float(hours), work_type, notes))
+    """, (member_id, date, float(hours), activity, notes))
     conn.commit()
     conn.close()
+
 
 def get_work_hours_by_member(member_id):
     conn = get_connection()
@@ -365,19 +370,31 @@ def get_work_hours_by_id(entry_id):
     conn.close()
     return row
 
-def update_work_hours(entry_id, date=None, work_type=None, hours=None, notes=None):
+# Database function to fetch work types
+
+def get_work_types():
+    conn = get_db_connection()
+    query = "SELECT DISTINCT work_type FROM work_hours"  # Assuming work_type is the field name
+    cursor = conn.cursor()
+    cursor.execute(query)
+    work_types = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return work_types
+
+def update_work_hours(entry_id, date=None, activity=None, hours=None, notes=None):
     conn = get_connection()
     c = conn.cursor()
     updates = []
     params = []
     if date is not None: updates.append("date=?"); params.append(date)
-    if work_type is not None: updates.append("work_type=?"); params.append(work_type)
+    if activity is not None: updates.append("activity=?"); params.append(activity)
     if hours is not None: updates.append("hours=?"); params.append(float(hours))
     if notes is not None: updates.append("notes=?"); params.append(notes)
     params.append(entry_id)
     c.execute(f"UPDATE work_hours SET {', '.join(updates)} WHERE id=?", params)
     conn.commit()
     conn.close()
+
 
 def delete_work_hours(entry_id):
     conn = get_connection()

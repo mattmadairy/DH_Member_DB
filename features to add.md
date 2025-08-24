@@ -1,6 +1,8 @@
-refine meeting attendance results. keep meeting totals for "all" but only return name and badge for each month
-mutually exclusive check boxes in attendance fixes. bugs and gives exceptions
-integrate all reports into one window, and make individual tabs for each report type.
+reports - meeting report tab working, add dues, work hours, member report (fetches all data for a given member), print functionality
+bug fixes for menu tabs: add & edit member
+main gui print formatting 
+member form complete
+font enlarge, window opening positions, background images, destroy_window changes.
 future integration with data captured from the card reader system. 
 log in/user accounts 
 logging actions 
