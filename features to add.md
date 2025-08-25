@@ -1,6 +1,9 @@
-reports - meeting report + dues + work hours working.  member report needs to be built (fetches all data for a given member), print functionality
-bug fixes for gui menu options: add & edit member
-refactor dues report to insert dues amount due from settings and membership type
+main gui search function
+format print screen
+
+bug fixes for gui menu options: add & edit member > move to member option
+double click on report entries
+right click on main form
 main gui print formatting 
 member form complete
 font enlarge, window opening positions, background images, destroy_window changes.
