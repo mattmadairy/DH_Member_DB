@@ -246,7 +246,15 @@ class MemberForm:
         for i, (label, var) in enumerate(field_names):
             ttk.Label(popup, text=label).grid(row=i, column=0, padx=5, pady=3, sticky="e")
             entry_var = tk.StringVar(value=var.get())
-            ttk.Entry(popup, textvariable=entry_var).grid(row=i, column=1, padx=5, pady=3, sticky="w")
+
+            # Use a Combobox for Membership Type
+            if label == "Membership Type":
+                w = ttk.Combobox(popup, textvariable=entry_var, 
+                                values=self.membership_types, state="readonly")
+            else:
+                w = ttk.Entry(popup, textvariable=entry_var)
+
+            w.grid(row=i, column=1, padx=5, pady=3, sticky="w")
             editors.append((var, entry_var))
 
         def save():
@@ -257,6 +265,7 @@ class MemberForm:
 
         ttk.Button(popup, text="Save", command=save).grid(row=len(field_names), column=0, pady=8)
         ttk.Button(popup, text="Cancel", command=popup.destroy).grid(row=len(field_names), column=1, pady=8)
+
 
     def _save_basic(self):
         database.update_member_basic(self.member_id,

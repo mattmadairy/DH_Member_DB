@@ -55,7 +55,7 @@ class BaseReport(tk.Frame):
         tk.Label(frame, text="Year:").pack(side="left", padx=(10,0))
         year_spin = tk.Spinbox(frame, from_=2000, to=2100, textvariable=self.year_var, width=6)
         year_spin.pack(side="left", padx=(0,10))
-        self.year_var.trace_add("write", lambda *args: self.populate_report())  # auto-refresh on year change
+        self.year_var.trace_add("write", lambda *args: self.populate_report())
 
         if self.include_month:
             tk.Label(frame, text="Month:").pack(side="left")
@@ -63,7 +63,7 @@ class BaseReport(tk.Frame):
             month_cb = ttk.Combobox(frame, values=months, textvariable=self.month_var, state="readonly", width=10)
             month_cb.pack(side="left", padx=(0,10))
             month_cb.configure(background="white")
-            self.month_var.trace_add("write", lambda *args: self.populate_report())  # auto-refresh on month change
+            self.month_var.trace_add("write", lambda *args: self.populate_report())
 
         tk.Button(frame, text="Export CSV", command=self.export_csv).pack(side="left", padx=5)
         tk.Button(frame, text="Print Report", command=self.print_report).pack(side="left", padx=5)
@@ -82,9 +82,15 @@ class BaseReport(tk.Frame):
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
+        # alignment rules for Treeview
         for col, width in zip(self.columns, self.column_widths):
             self.tree.heading(col, text=col.replace("_"," ").title())
-            self.tree.column(col, width=width, anchor="w")
+            if col in ("badge", "year", "method", "last_payment_date"):
+                self.tree.column(col, width=width, anchor="center")
+            elif col in ("amount_due", "balance_due", "amount_paid"):
+                self.tree.column(col, width=width, anchor="e")
+            else:
+                self.tree.column(col, width=width, anchor="w")
 
     def export_csv(self):
         items = self.tree.get_children()
@@ -126,8 +132,18 @@ class BaseReport(tk.Frame):
                 if len(value) > col_widths[idx]:
                     col_widths[idx] = len(value)
 
+        # alignment rules for printing
+        alignment = {}
+        for col in self.columns:
+            if col in ("badge", "year", "method", "last_payment_date"):
+                alignment[col] = "center"
+            elif col in ("amount_due", "balance_due", "amount_paid"):
+                alignment[col] = "right"
+            else:
+                alignment[col] = "left"
+
         # Pagination
-        lines_per_page = 40  # including header/footer
+        lines_per_page = 40
         pages = []
         current_lines = []
 
@@ -138,8 +154,13 @@ class BaseReport(tk.Frame):
             current_lines.append(f"Timeframe: {timeframe}".center(sum(col_widths) + len(col_widths) * 3))
             current_lines.append("=" * (sum(col_widths) + len(col_widths) * 3))
             header_line = ""
-            for h, w in zip(headers, col_widths):
-                header_line += h.ljust(w + 3)
+            for col, h, w in zip(self.columns, headers, col_widths):
+                if alignment[col] == "center":
+                    header_line += h.center(w + 3)
+                elif alignment[col] == "right":
+                    header_line += h.rjust(w + 3)
+                else:
+                    header_line += h.ljust(w + 3)
             current_lines.append(header_line)
             current_lines.append("-" * (sum(col_widths) + len(col_widths) * 3))
 
@@ -149,25 +170,28 @@ class BaseReport(tk.Frame):
         for item in items:
             row = self.tree.item(item, "values")
             line = ""
-            for val, w in zip(row, col_widths):
-                line += str(val).ljust(w + 3)
+            for col, val, w in zip(self.columns, row, col_widths):
+                val = str(val)
+                if alignment[col] == "center":
+                    line += val.center(w + 3)
+                elif alignment[col] == "right":
+                    line += val.rjust(w + 3)
+                else:
+                    line += val.ljust(w + 3)
             current_lines.append(line)
             row_count += 1
 
-            # Start new page if needed
-            if row_count >= lines_per_page - 6:  # reserve lines for footer
+            if row_count >= lines_per_page - 6:
                 pages.append(current_lines)
                 current_lines = []
                 row_count = 0
                 add_header()
 
-        # Add remaining lines as last page
         if current_lines:
             pages.append(current_lines)
 
         total_pages = len(pages)
 
-        # Append footer to each page with Page X of Y
         for i, page_lines in enumerate(pages, start=1):
             footer_width = sum(col_widths) + len(col_widths) * 3
             page_lines.append("=" * footer_width)
@@ -176,36 +200,30 @@ class BaseReport(tk.Frame):
 
         full_text = "\n\n".join("\n".join(p) for p in pages)
 
-        # Display in Tkinter Text widget
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         text = tk.Text(print_window, wrap="none", font=("Courier", 10))
         text.insert("1.0", full_text)
         text.pack(fill="both", expand=True)
 
-        # Scrollbars
         vsb = ttk.Scrollbar(print_window, orient="vertical", command=text.yview)
         vsb.pack(side="right", fill="y")
         hsb = ttk.Scrollbar(print_window, orient="horizontal", command=text.xview)
         hsb.pack(side="bottom", fill="x")
         text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-
-
     def populate_report(self):
         raise NotImplementedError("populate_report must be implemented in subclass")
-    
-# ---------------- Dues Report ---------------- #
 
+# ---------------- Dues Report ---------------- #
 class DuesReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "membership_type", "amount_due", "balance_due",
                         "year", "last_payment_date", "amount_paid", "method")
         self.column_widths = (60, 150, 110, 80, 80, 60, 120, 80, 80)
-        super().__init__(parent, member_id, include_month=False)  # no month filter
+        super().__init__(parent, member_id, include_month=False)
         self.populate_report()
 
-    # populate_report stays the same
     def populate_report(self):
         for row in self.tree.get_children():
             self.tree.delete(row)
@@ -269,9 +287,7 @@ class DuesReport(BaseReport):
                     f"{total_paid:.2f}", method
                 ))
         except Exception as e:
-                messagebox.showerror("Dues Report", f"Failed to fetch dues data:\n{e}")
-
-
+            messagebox.showerror("Dues Report", f"Failed to fetch dues data:\n{e}")
 
 class Work_HoursReport(BaseReport):
     def __init__(self, parent, member_id=None):
