@@ -51,6 +51,8 @@ class MemberApp:
         menubar.add_cascade(label="Members", menu=members_menu)
         members_menu.add_command(label="➕ Add Member", command=self.add_member)
         members_menu.add_command(label="✏️ Edit Selected", command=self.edit_selected)
+        members_menu.add_command(label="Generate Member Report", command=self._full_member_report_from_menu)
+        members_menu.add_separator()
         members_menu.add_command(label="❌ Delete Selected", command=self.delete_selected)
 
         menubar.add_command(label="Reports", command=lambda: ReportsWindow(self.root))
@@ -80,7 +82,7 @@ class MemberApp:
         # Right-click menu
         self.row_menu = tk.Menu(self.root, tearoff=0)
         self.row_menu.add_command(label="Edit Member", command=self._edit_selected_row)
-        self.row_menu.add_command(label="Full Member Report", command=self._full_member_report_from_menu)
+        self.row_menu.add_command(label="Generate Member Report", command=self._full_member_report_from_menu)
         self.row_menu.add_separator()
         self.row_menu.add_command(label="Delete Member", command=self._delete_selected_row)
 
@@ -198,19 +200,24 @@ class MemberApp:
         member_id = selected[0]
         form = self._open_member_form(member_id)
         self.root.wait_window(form.top)
+    
 
     def _full_member_report_from_menu(self):
+        """Wrapper to get selected member from the current tab and call the full report."""
         current_tab = self.notebook.tab(self.notebook.select(), "text")
         tree = self.trees[current_tab]
         selected = tree.selection()
         if not selected:
-            messagebox.showwarning("No selection", "Please select a member.")
+            messagebox.showwarning("No Selection", "Please select a member first.")
             return
-        member_id = selected[0]
+        member_id = selected[0]  # assuming iid = member_id
         self._full_member_report(member_id)
 
-    # ---------- Full Member Report ----------
+
+
+
     def _full_member_report(self, member_id):
+        """Display a full member report for a single member."""
         try:
             member = database.get_member_by_id(member_id)
             if not member:
@@ -221,58 +228,232 @@ class MemberApp:
             return
 
         org_name = "Dug Hill Rod & Gun Club"
-        report_name = "Full Member Report"
+        report_name = f"Full Member Report for {member[3]} {member[4]}"
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
         generated_text = f"Generated: {generation_dt}"
+        total_members_text = "End of Report"
 
-        headers = self.FULL_COLUMNS
-        values = [
-            member[1], member[2], member[3], member[4], member[5], member[6], member[13], member[7],
-            member[8], member[9], member[10], member[11], member[12], member[14], member[15], member[16]
+        page_width = 80
+        row_lines = []
+
+        
+        # -------- Member Info Sections (two columns, left-aligned) -------- #
+        left_blocks = [
+            ("  Personal", [("First Name", member[3]), ("Last Name", member[4]), ("Date of Birth", member[5])]),
+            ("  Contact", [("Email Address", member[6]), ("Email Address 2", member[13]), ("Phone Number", member[7])]),
+            ("  Access", [("Card/Fob Internal #", member[15]), ("Card/Fob External #", member[16])])
         ]
 
-        max_header_len = max(len(h) for h in headers)
-        row_lines = [f"{h.ljust(max_header_len)}    {str(v)}" for h, v in zip(headers, values)]
+        right_blocks = [
+            ("  Membership", [("Badge", member[1]), ("Membership Type", member[2]), ("Join Date", member[12]), ("Sponsor", member[14])]),
+            ("  Address", [("Address", member[8]), ("City", member[9]), ("State", member[10]), ("Zip Code", member[11])])
+        ]
 
-        total_members_text = "1 Member"
+        spacing = 6  # spaces between left and right columns
 
-        header_line_len = max(len(org_name), len(report_name), len(generated_text), max(len(line) for line in row_lines))
-        report_text = f"{org_name.center(header_line_len)}\n"
-        report_text += f"{report_name.center(header_line_len)}\n"
-        report_text += f"{generated_text.center(header_line_len)}\n"
-        report_text += "=" * header_line_len + "\n\n"  # Separator under header
-        report_text += "\n".join(row_lines) + "\n\n"
-        report_text += "=" * header_line_len + "\n"    # Separator above footer
-        
+        # Compute max widths for left and right columns
+        def compute_max_width(blocks):
+            label_width = max(len(h) for section, fields in blocks for h, _ in fields) + 2
+            value_width = max(len(str(v)) for section, fields in blocks for _, v in fields) + 2
+            return label_width, value_width
+
+        left_label_width, left_value_width = compute_max_width(left_blocks)
+        right_label_width, right_value_width = compute_max_width(right_blocks)
+
+        # Prepare row_lines for each pair of left/right blocks
+        max_rows = max(len(left_blocks), len(right_blocks))
+        for i in range(max_rows):
+            # Section titles
+            line = ""
+            if i < len(left_blocks):
+                section, fields = left_blocks[i]
+                line += section.ljust(left_label_width + left_value_width)
+            else:
+                line += " " * (left_label_width + left_value_width)
+
+            line += " " * spacing
+
+            if i < len(right_blocks):
+                section, fields = right_blocks[i]
+                line += section.ljust(right_label_width + right_value_width)
+
+            row_lines.append(line.rstrip())
+
+            # Determine max number of fields in this pair of blocks
+            left_fields = left_blocks[i][1] if i < len(left_blocks) else []
+            right_fields = right_blocks[i][1] if i < len(right_blocks) else []
+            max_fields = max(len(left_fields), len(right_fields))
+
+            for j in range(max_fields):
+                line = ""
+                if j < len(left_fields):
+                    h, v = left_fields[j]
+                    line += f"{h.ljust(left_label_width)}{str(v).ljust(left_value_width)}"
+                else:
+                    line += " " * (left_label_width + left_value_width)
+
+                line += " " * spacing
+
+                if j < len(right_fields):
+                    h, v = right_fields[j]
+                    line += f"{h.ljust(right_label_width)}{str(v).ljust(right_value_width)}"
+
+                row_lines.append(line.rstrip())
+
+            row_lines.append("")  # empty line after each block row
+            row_lines.append("") 
 
 
-        # Display
+        # -------- Dues Section -------- #
+        row_lines.append("  Dues History".ljust(page_width))
+        dues = database.get_dues_by_member(member_id)
+        if dues:
+            row_lines.append(f"{'Payment Date'.ljust(14)}{'Year'.ljust(6)}{'Amount'.ljust(10)}{'Method'.ljust(15)}{'Notes'.ljust(40)}")
+            total_dues = 0.0
+            for row in dues:
+                payment_date = row[2]
+                if payment_date:
+                    try:
+                        payment_date = datetime.strptime(payment_date, "%Y-%m-%d").strftime("%m-%d-%Y")
+                    except ValueError:
+                        pass
+                else:
+                    payment_date = "N/A"
+                year = str(row[3] or "N/A")
+                amount = float(row[4] or 0.0)
+                total_dues += amount
+                method = str(row[5] or "")
+                notes = str(row[6] or "")
+                line = f"{payment_date.ljust(14)}{year.ljust(6)}{f'{amount:.2f}'.ljust(10)}{method.ljust(15)}{notes.ljust(40)}"
+                row_lines.append(line)
+            row_lines.append("-" * page_width)
+            row_lines.append(f"Total Dues: ${total_dues:.2f}".ljust(page_width))
+        else:
+            row_lines.append("No dues recorded".ljust(page_width))
+            row_lines.append("-" * page_width)
+
+        row_lines.append("")
+        row_lines.append("")
+
+        # -------------------- Work Hours Section -------------------- #
+        row_lines.append("  Work Hours".ljust(page_width))
+        work_hours = database.get_work_hours_by_member(member_id)
+        if work_hours:
+            row_lines.append(f"{'Date'.ljust(12)}{'Hours'.ljust(6)}{'Activity'.ljust(20)}{'Notes'.ljust(40)}")
+            row_lines.append("-" * page_width)
+            total_hours = 0.0
+            for row in work_hours:
+                raw_date = row[2]
+                try:
+                    date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%m-%d-%Y") if raw_date else "N/A"
+                except ValueError:
+                    date = raw_date or "N/A"
+                hours = float(row[4] or 0)
+                activity = str(row[3] or "")
+                notes = str(row[5] or "")
+                row_lines.append(f"{date.ljust(12)}{str(hours).ljust(6)}{activity.ljust(20)}{notes.ljust(40)}")
+                total_hours += hours
+            row_lines.append("-" * page_width)
+            row_lines.append(f"Total Work Hours: {total_hours}".ljust(page_width))
+        else:
+            row_lines.append("No work hours reported".ljust(page_width))
+            row_lines.append("-" * page_width)
+            row_lines.append(f"Total Work Hours: 0".ljust(page_width))
+
+        row_lines.append("")
+        row_lines.append("")
+
+        # -------------------- Attendance -------------------- #
+        row_lines.append("  Meeting Attendance".ljust(page_width))
+        attendance = database.get_meeting_attendance(member_id)
+        if attendance:
+            row_lines.append(f"{'Date'.ljust(12)}{'Status'.ljust(20)}{'Notes'.ljust(40)}")
+            row_lines.append("-" * page_width)
+            total_meetings = 0
+            for row in attendance:
+                raw_date = row[2]
+                try:
+                    date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%m-%d-%Y") if raw_date else "N/A"
+                except ValueError:
+                    date = raw_date or "N/A"
+                status = str(row[3] or "")
+                notes = str(row[4] or "")
+                row_lines.append(f"{date.ljust(12)}{status.ljust(20)}{notes.ljust(40)}")
+                total_meetings += 1
+            row_lines.append("-" * page_width)
+            row_lines.append(f"Total Meetings Attended: {total_meetings}".ljust(page_width))
+            row_lines.append("" * page_width)
+        else:
+            row_lines.append("No attendance recorded".ljust(page_width))
+            row_lines.append("-" * page_width)
+            row_lines.append(f"Total Meetings Attended: 0".ljust(page_width))
+
+        # -------- Build Full Report Text -------- #
+        report_text = ""
+        report_text += f"{org_name.center(page_width)}\n"
+        report_text += f"{report_name.center(page_width)}\n"
+        report_text += f"{generated_text.center(page_width)}\n"
+        report_text += "=" * page_width + "\n\n"
+        report_text += "\n".join(row_lines) + "\n"
+        report_text += "=" * page_width + "\n"
+        report_text += f"{total_members_text.center(page_width)}\n"
+        report_text += "=" * page_width + "\n"
+
+        # -------- Preview Window -------- #
+        # Approximate pixels for 8.5" x 11" at 96 DPI
+        width_px = int(6.5 * 96)   # 816 pixels
+        height_px = int(10 * 96)   # 1056 pixels
+
         preview = tk.Toplevel(self.root)
         preview.title(f"Full Member Report - {member[3]} {member[4]}")
+
+        # Get screen width and height
+        screen_width = preview.winfo_screenwidth()
+        screen_height = preview.winfo_screenheight()
+
+        # Calculate x and y coordinates to center the window
+        x = (screen_width // 2) - (width_px // 2)
+        y = (screen_height // 2) - (height_px // 2)
+
+        # Set geometry with centering
+        preview.geometry(f"{width_px}x{height_px}+{x}+{y}")
+
+        # Frame and text widget
         text_frame = ttk.Frame(preview)
         text_frame.pack(fill="both", expand=True)
-        text = tk.Text(text_frame, wrap="none")
+
+        text = tk.Text(text_frame, wrap="none", font=("Courier New", 10))
         text.insert("1.0", report_text)
         text.configure(state="disabled")
         text.pack(fill="both", expand=True, side="left")
+
+        # Scrollbars
         yscroll = ttk.Scrollbar(text_frame, orient="vertical", command=text.yview)
         yscroll.pack(side="right", fill="y")
         text.configure(yscrollcommand=yscroll.set)
+
         xscroll = ttk.Scrollbar(preview, orient="horizontal", command=text.xview)
         xscroll.pack(side="bottom", fill="x")
         text.configure(xscrollcommand=xscroll.set)
 
-        # Buttons
+
         btn_frame = ttk.Frame(preview)
         btn_frame.pack(fill="x", pady=5)
+        ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=10)
+
         def print_text():
-            import tempfile
-            temp_file = tempfile.mktemp(".txt")
-            with open(temp_file, "w") as f:
-                f.write(report_text)
-            os.startfile(temp_file, "print")
+            try:
+                import tempfile
+                temp_file = tempfile.mktemp(".txt")
+                with open(temp_file, "w") as f:
+                    f.write(report_text)
+                os.startfile(temp_file, "print")
+            except Exception as e:
+                messagebox.showerror("Print Error", f"Failed to print: {e}")
+
         ttk.Button(btn_frame, text="Print", command=print_text).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=10)
+
 
     # ---------- Load Members ----------
     def load_data(self):

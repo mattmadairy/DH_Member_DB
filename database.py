@@ -291,6 +291,16 @@ def get_member_by_id(member_id):
     conn.close()
     return row
 
+def get_member_by_badge(badge):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM members WHERE badge_number=?", (badge,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+
+
 def get_all_members():
     conn = get_connection()
     c = conn.cursor()

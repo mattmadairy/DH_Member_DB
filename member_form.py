@@ -83,10 +83,18 @@ class MemberForm:
         self.member_id = member_id
         self.on_save_callback = on_save_callback
 
-        self.notebook = ttk.Notebook(self.top)
+        # ----- Notebook -----
+        style = ttk.Style(self.top)
+        style.configure(
+            "CustomNotebook.TNotebook.Tab",
+            padding=[12, 5],  # slightly larger than text
+            anchor="center"
+        )
+
+        self.notebook = ttk.Notebook(self.top, style="CustomNotebook.TNotebook")
         self.notebook.pack(fill="both", expand=True)
 
-        # Tabs
+        # ----- Tabs -----
         self.tab_basic = ttk.Frame(self.notebook)
         self.tab_contact = ttk.Frame(self.notebook)
         self.tab_membership = ttk.Frame(self.notebook)
@@ -101,7 +109,20 @@ class MemberForm:
         self.notebook.add(self.tab_work_hours, text="Work Hours")
         self.notebook.add(self.tab_attendance, text="Meeting Attendance")
 
-        # Variables
+        # ----- Resize Tabs -----
+        def resize_tabs(event=None):
+            total_tabs = len(self.notebook.tabs())
+            if total_tabs == 0:
+                return
+            notebook_width = self.notebook.winfo_width()
+            # Stretch tabs to fill width but limit max tab width
+            tab_width = min(150, notebook_width // total_tabs)
+            style.configure("CustomNotebook.TNotebook.Tab", width=tab_width)
+
+        resize_tabs()
+        self.notebook.bind("<Configure>", resize_tabs)
+
+        # ----- Variables -----
         self.badge_number_var = tk.StringVar()
         self.membership_type_var = tk.StringVar()
         self.first_name_var = tk.StringVar()
@@ -122,7 +143,7 @@ class MemberForm:
 
         self._display_labels = {}
 
-        # Read-only tabs
+        # ----- Read-only tabs -----
         self._build_read_only_tab(self.tab_basic, [
             ("First Name", self.first_name_var),
             ("Last Name", self.last_name_var),
@@ -148,14 +169,24 @@ class MemberForm:
             ("Card/Fob External Number", self.card_external_var)
         ], self._edit_membership, "membership")
 
-        # Data tabs
+        # ----- Data tabs -----
         self.dues_tab = DuesTab(self.tab_dues, self.member_id)
         self.work_tab = WorkHoursTab(self.tab_work_hours, self.member_id)
         self.attendance_tab = AttendanceTab(self.tab_attendance, self.member_id)
 
-        # Load member data
+        # ----- Load member data -----
         if self.member_id:
             self._load_member_data()
+
+        # ----- Set reasonable default window size -----
+        self.top.update_idletasks()  # calculate natural size
+        natural_width = self.top.winfo_width()
+        natural_height = self.top.winfo_height()
+        width = max(850, min(natural_width, 1000))  # limit max width
+        height = max(300, natural_height)
+        self.top.geometry(f"{width}x{height}")
+
+
 
     def _build_read_only_tab(self, tab, fields, edit_callback, tab_key):
         self._display_labels[tab_key] = {}

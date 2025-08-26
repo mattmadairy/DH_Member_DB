@@ -41,6 +41,8 @@ class BaseReport(tk.Frame):
         self.tree = None
         self._setup_controls()
         self._create_tree()
+        self.tree.bind("<Double-1>", self.on_double_click)
+
 
     def _setup_controls(self):
         frame = tk.Frame(self)
@@ -215,10 +217,41 @@ class BaseReport(tk.Frame):
     def populate_report(self):
         raise NotImplementedError("populate_report must be implemented in subclass")
 
+    def on_double_click(self, event):
+        """Open member form when a row is double-clicked."""
+        selected = self.tree.selection()
+        if not selected:
+            return
+
+        values = self.tree.item(selected[0], "values")
+        if not values:
+            return
+
+        # Assume "badge" is always first column
+        badge = values[0]
+
+        try:
+            member = database.get_member_by_badge(badge)  # <-- you'll need this helper
+            if member:
+                member_id = member[0]  # assuming first col is id
+                from member_form import MemberForm
+                form = MemberForm(self, member_id=member_id)
+
+                # Center on screen
+                form.update_idletasks()
+                w, h = form.winfo_width(), form.winfo_height()
+                x = (form.winfo_screenwidth() // 2) - (w // 2)
+                y = (form.winfo_screenheight() // 2) - (h // 2)
+                form.geometry(f"{w}x{h}+{x}+{y}")
+                form.deiconify()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open member form:\n{e}")
+
+
 # ---------------- Dues Report ---------------- #
 class DuesReport(BaseReport):
     def __init__(self, parent, member_id=None):
-        self.columns = ("badge", "name", "membership_type", "amount_due", "balance_due",
+        self.columns = ("badge_number", "name", "membership_type", "amount_due", "balance_due",
                         "year", "last_payment_date", "amount_paid", "method")
         self.column_widths = (60, 150, 110, 80, 80, 60, 120, 80, 80)
         super().__init__(parent, member_id, include_month=False)
