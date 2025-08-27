@@ -4,13 +4,22 @@ import csv
 import database
 import calendar
 from datetime import datetime
-from member_form import MemberForm
+from gui import MemberForm
+
+
 
 class ReportsWindow(tk.Toplevel):
     def __init__(self, parent, member_id=None):
         super().__init__(parent)
         self.title("Reports")
         self.geometry("900x600")
+        from gui import center_window
+        center_window(self, 900, 600, parent)
+
+                # Keep it on top of the main window
+        self.transient(parent)   # Associate with main window
+        self.grab_set()          # Make it modal (prevents interacting with main window)
+        self.focus()             # Ensure it gets focus
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=5, pady=5)

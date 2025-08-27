@@ -7,20 +7,6 @@ DB_NAME = "members.db"
 
 conn = None
 
-
-def get_connection():
-    return sqlite3.connect(DB_NAME)
-
-def connect_db():
-    global conn
-    if conn is None:
-        conn = sqlite3.connect("members.db")  # Make sure to replace with your database path
-    return conn 
-
-def get_db_connection():
-    conn = sqlite3.connect('members.db')  # or use your database connection settings
-    return conn
-
 def get_connection():
     try:
         conn = sqlite3.connect(DB_NAME)
@@ -172,7 +158,7 @@ except Exception as e:
 
 # ------------------ Settings ----------------- #
 def get_setting(key):
-    conn = connect_db()
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
     row = cursor.fetchone()
@@ -275,11 +261,161 @@ def soft_delete_member_by_id(member_id):
     c.execute("UPDATE members SET deleted=1 WHERE id=?", (member_id,))
     conn.commit()
     conn.close()
+    
+def delete_member_permanently(member_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM members WHERE id=?", (member_id,))
+    conn.commit()
+    conn.close()
+
+
+def permanently_delete_member_by_id(member_id):
+    conn = sqlite3.connect("members.db")
+    c = conn.cursor()
+    try:
+        # Get member data from recycle_bin
+        c.execute("SELECT * FROM recycle_bin WHERE id=?", (member_id,))
+        member = c.fetchone()
+        if not member:
+            return  # nothing to delete
+
+        # Insert into deleted_members table for logging
+        c.execute("""
+            INSERT INTO deleted_members (
+                id, badge, membership_type, first_name, last_name,
+                date_of_birth, email_address, email_address_2, phone_number,
+                address, city, state, zip_code, join_date, sponsor,
+                card_fob_internal, card_fob_external, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, member + (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
+
+        # Delete from recycle_bin
+        c.execute("DELETE FROM recycle_bin WHERE id=?", (member_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def log_and_delete_member(recycle_id, db_path="members.db"):
+    """
+    Logs a permanently deleted member into deleted_members,
+    then removes them from recycle_bin.
+    """
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    try:
+        # 1. Look up recycle_bin row by recycle_id
+        c.execute("SELECT badge FROM recycle_bin WHERE id=?", (recycle_id,))
+        row = c.fetchone()
+        if not row:
+            print(f"Recycle bin entry {recycle_id} not found")
+            return
+        badge_number = row[0]
+
+        # 2. Fetch full member details from members by badge_number
+        c.execute("""
+            SELECT id, badge_number, membership_type, first_name, last_name,
+                   dob, email, phone, address, city, state, zip, join_date,
+                   email2, sponsor, card_internal, card_external
+            FROM members WHERE badge_number=?
+        """, (badge_number,))
+        member = c.fetchone()
+        if not member:
+            print(f"No full record found in members for badge {badge_number}")
+            return
+
+        # 3. Insert into deleted_members with deleted_at timestamp
+        c.execute("""
+            INSERT INTO deleted_members (
+                id, badge_number, membership_type, first_name, last_name,
+                dob, email, phone, address, city, state, zip_code, join_date,
+                email2, sponsor, card_internal, card_external, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, member + (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
+
+        # 4. Delete the recycle_bin row itself
+        c.execute("DELETE FROM recycle_bin WHERE id=?", (recycle_id,))
+        conn.commit()
+        print(f"Member with badge {badge_number} permanently deleted and logged.")
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_recycle_bin_members(db_path="members.db"):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("SELECT id, first, last, membership_type, badge FROM recycle_bin")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def restore_member_from_recycle_bin(recycle_id, db_path="members.db"):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # First, check recycle_bin for basic info
+    c.execute("SELECT badge, membership_type, first, last FROM recycle_bin WHERE id=?", (recycle_id,))
+    recycle_row = c.fetchone()
+    if not recycle_row:
+        conn.close()
+        raise ValueError(f"Recycle bin entry {recycle_id} not found")
+    badge, membership_type, first, last = recycle_row
+
+    # Next, try to get full info from deleted_members (if available)
+    c.execute("SELECT * FROM deleted_members WHERE badge_number=?", (badge,))
+    deleted_row = c.fetchone()
+
+    if deleted_row:
+        # Deleted_members schema:
+        # (id, badge_number, membership_type, first_name, last_name, dob, email, phone, address,
+        #  city, state, zip_code, join_date, email2, sponsor, card_internal, card_external, deleted_at)
+
+        (_, badge_number, mtype, fname, lname, dob, email, phone, address,
+         city, state, zip_code, join_date, email2, sponsor,
+         card_internal, card_external, _) = deleted_row
+
+        # Restore full member
+        c.execute("""
+            INSERT INTO members (
+                badge_number, membership_type, first_name, last_name,
+                dob, email, phone, address, city, state, zip, join_date,
+                email2, sponsor, card_internal, card_external, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """, (
+            badge_number, mtype, fname, lname, dob, email, phone, address,
+            city, state, zip_code, join_date, email2, sponsor, card_internal, card_external
+        ))
+
+    else:
+        # Fallback: restore minimal data
+        c.execute("""
+            INSERT INTO members (badge_number, membership_type, first_name, last_name, deleted)
+            VALUES (?, ?, ?, ?, 0)
+        """, (badge, membership_type, first, last))
+
+    # Remove from recycle_bin
+    c.execute("DELETE FROM recycle_bin WHERE id=?", (recycle_id,))
+    conn.commit()
+    conn.close()
+
+
 
 def restore_member(member_id):
     conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE members SET deleted=0 WHERE id=?", (member_id,))
+    conn.commit()
+    conn.close()
+
+def restore_member_by_id(member_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE members SET deleted=0 WHERE id=?", (member_id,))
     conn.commit()
     conn.close()
 
@@ -311,9 +447,9 @@ def get_all_members():
 
 def get_deleted_members():
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM members WHERE deleted=1")
-    rows = c.fetchall()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM members WHERE deleted=1")  # assumes a 'deleted' flag
+    rows = cursor.fetchall()
     conn.close()
     return rows
 
@@ -321,6 +457,7 @@ def get_deleted_members():
 def add_dues_payment(member_id, amount, payment_date, method=None, notes=None, year=None):
     if not year:
         year = get_default_year()
+        
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
@@ -330,13 +467,32 @@ def add_dues_payment(member_id, amount, payment_date, method=None, notes=None, y
     conn.commit()
     conn.close()
 
-def get_dues_by_member(member_id):
+
+def get_dues_by_member(member_id, year=None):
+    """
+    Fetch dues for a specific member.
+    If year is provided, only return dues for that year.
+    """
+    
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM dues WHERE member_id=? ORDER BY payment_date DESC", (member_id,))
-    rows = c.fetchall()
+    cur = conn.cursor()
+    
+    if year:
+        cur.execute("""
+            SELECT * FROM dues 
+            WHERE member_id = ? AND year = ?
+            ORDER BY payment_date ASC
+        """, (member_id, str(year)))
+    else:
+        cur.execute("""
+            SELECT * FROM dues 
+            WHERE member_id = ?
+            ORDER BY payment_date ASC
+        """, (member_id,))
+    
+    results = cur.fetchall()
     conn.close()
-    return rows
+    return results
 
 def get_dues_report(member_id=None, year=None, month=None):
     """
@@ -419,13 +575,32 @@ def add_work_hours(member_id, date, hours, activity=None, notes=None):
     conn.close()
 
 
-def get_work_hours_by_member(member_id):
+def get_work_hours_by_member(member_id, year=None):
+    """
+    Fetch work hours for a specific member.
+    If year is provided, only return work hours for that year.
+    """
+    
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM work_hours WHERE member_id=? ORDER BY date DESC", (member_id,))
-    rows = c.fetchall()
+    cur = conn.cursor()
+
+    if year:
+        cur.execute("""
+            SELECT * FROM work_hours
+            WHERE member_id = ? AND strftime('%Y', date) = ?
+            ORDER BY date ASC
+        """, (member_id, str(year)))
+    else:
+        cur.execute("""
+            SELECT * FROM work_hours
+            WHERE member_id = ?
+            ORDER BY date ASC
+        """, (member_id,))
+    
+    results = cur.fetchall()
     conn.close()
-    return rows
+    return results
+
 
 def get_work_hours_by_id(entry_id):
     conn = get_connection()
@@ -438,7 +613,7 @@ def get_work_hours_by_id(entry_id):
 # Database function to fetch work types
 
 def get_work_types():
-    conn = get_db_connection()
+    conn = get_connection()
     query = "SELECT DISTINCT work_type FROM work_hours"  # Assuming work_type is the field name
     cursor = conn.cursor()
     cursor.execute(query)
@@ -479,18 +654,33 @@ def add_meeting_attendance(member_id, meeting_date, status, notes=None):
     conn.commit()
     conn.close()
 
-def get_meeting_attendance(member_id=None):
+def get_meeting_attendance(member_id, year=None):
+    """
+    Fetch meeting attendance for a specific member.
+    If year is provided, only return attendance records for that year.
+    """
+    
     conn = get_connection()
-    c = conn.cursor()
-    if member_id:
-        c.execute("SELECT * FROM meeting_attendance WHERE member_id=? ORDER BY meeting_date DESC", (member_id,))
-    else:
-        c.execute("SELECT * FROM meeting_attendance ORDER BY meeting_date DESC")
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    try:
+        cur = conn.cursor()
+        if year:
+            cur.execute("""
+                SELECT * FROM meeting_attendance
+                WHERE member_id = ? AND strftime('%Y', meeting_date) = ?
+                ORDER BY meeting_date ASC
+            """, (member_id, str(year)))
+        else:
+            cur.execute("""
+                SELECT * FROM meeting_attendance
+                WHERE member_id = ?
+                ORDER BY meeting_date ASC
+            """, (member_id,))
+        
+        results = cur.fetchall()
+        return results
+    finally:
+        conn.close()
 
-# in database.py
 def get_attendance_summary(year=None, month=None):
     import sqlite3
     conn = sqlite3.connect("members.db")
@@ -778,3 +968,148 @@ def get_member_work_hours_for_month(member_id, year, month):
     total = cur.fetchone()[0]
     conn.close()
     return total
+
+
+
+
+def get_conn():
+    return sqlite3.connect(DB_NAME)
+
+# --- Helper: fetch a single member row (must be in recycle bin = deleted=1) ---
+def _fetch_deleted_member(member_id, conn):
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, badge_number, membership_type, first_name, last_name,
+               dob, email, phone, address, city, state, zip, join_date,
+               email2, sponsor, card_internal, card_external, deleted
+        FROM members
+        WHERE id=? AND deleted=1
+    """, (member_id,))
+    return c.fetchone()
+
+# --- Show in Recycle Bin UI (your TreeView uses this) ---
+def get_deleted_members():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, badge_number, membership_type, first_name, last_name,
+               dob, email, phone, address, city, state, zip, join_date,
+               email2, sponsor, card_internal, card_external, deleted
+        FROM members
+        WHERE deleted=1
+        ORDER BY last_name, first_name
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# --- Soft delete: mark deleted=1 and (optionally) drop a simple crumb in recycle_bin ---
+def soft_delete_member_by_id(member_id):
+    with get_conn() as conn:
+        c = conn.cursor()
+        # Grab minimal info to mirror into recycle_bin (optional but helpful)
+        c.execute("SELECT first_name, last_name, membership_type, badge_number FROM members WHERE id=?", (member_id,))
+        row = c.fetchone()
+        if not row:
+            raise ValueError(f"Member {member_id} not found.")
+        first, last, membership_type, badge = row
+
+        # Mark as deleted
+        c.execute("UPDATE members SET deleted=1 WHERE id=?", (member_id,))
+
+        # Keep a light entry in recycle_bin (schema: id, first, last, membership_type, badge)
+        try:
+            c.execute("""
+                INSERT INTO recycle_bin (first, last, membership_type, badge)
+                VALUES (?, ?, ?, ?)
+            """, (first or "", last or "", membership_type or "", int(badge) if str(badge).isdigit() else None))
+        except Exception:
+            # If recycle_bin insert fails due to badge type, ignore (UI reads from members.deleted anyway)
+            pass
+
+        # Optional audit
+        try:
+            c.execute("INSERT INTO deletion_log (member_id, action) VALUES (?, 'soft_delete')", (member_id,))
+        except Exception:
+            pass
+
+# --- Restore from Recycle Bin (members.id) ---
+def restore_member_by_id(member_id):
+    with get_conn() as conn:
+        c = conn.cursor()
+
+        # Member must exist and be soft-deleted
+        c.execute("SELECT badge_number FROM members WHERE id=? AND deleted=1", (member_id,))
+        r = c.fetchone()
+        if not r:
+            raise ValueError(f"Member {member_id} is not in the recycle bin (or not found).")
+        badge = r[0]
+
+        # Flip the flag
+        c.execute("UPDATE members SET deleted=0 WHERE id=?", (member_id,))
+
+        # Clean up any recycle_bin rows that match this badge (best-effort)
+        try:
+            if badge is not None and str(badge).strip() != "":
+                c.execute("DELETE FROM recycle_bin WHERE badge=?", (int(badge),))
+        except Exception:
+            # Badge might be non-numeric in your data; try textual match
+            try:
+                c.execute("DELETE FROM recycle_bin WHERE CAST(badge AS TEXT)=?", (str(badge),))
+            except Exception:
+                pass
+
+        # Optional audit
+        try:
+            c.execute("INSERT INTO deletion_log (member_id, action) VALUES (?, 'restore')", (member_id,))
+        except Exception:
+            pass
+
+# --- Permanently delete (members.id) and LOG FULL ROW into deleted_members ---
+def permanently_delete_member_by_id(member_id):
+    with get_conn() as conn:
+        c = conn.cursor()
+
+        # Must be in recycle bin (deleted=1)
+        m = _fetch_deleted_member(member_id, conn)
+        if not m:
+            raise ValueError(f"Member {member_id} is not in the recycle bin or does not exist.")
+
+        (mid, badge_number, membership_type, first_name, last_name,
+         dob, email, phone, address, city, state, zip_code, join_date,
+         email2, sponsor, card_internal, card_external, _deleted_flag) = m
+
+        # 1) Write to deleted_members (note: schema uses zip_code)
+        c.execute("""
+            INSERT OR REPLACE INTO deleted_members (
+                id, badge_number, membership_type, first_name, last_name,
+                dob, email, phone, address, city, state, zip_code, join_date,
+                email2, sponsor, card_internal, card_external, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            mid, badge_number, membership_type, first_name, last_name,
+            dob, email, phone, address, city, state, zip_code, join_date,
+            email2, sponsor, card_internal, card_external,
+            datetime.now().isoformat(timespec="seconds")
+        ))
+
+        # 2) Remove from members
+        c.execute("DELETE FROM members WHERE id=?", (member_id,))
+
+        # 3) Clean up recycle_bin entries with same badge (best-effort)
+        try:
+            if badge_number is not None and str(badge_number).strip() != "":
+                # Try numeric first
+                c.execute("DELETE FROM recycle_bin WHERE badge=?", (int(badge_number),))
+        except Exception:
+            # Fallback textual compare
+            try:
+                c.execute("DELETE FROM recycle_bin WHERE CAST(badge AS TEXT)=?", (str(badge_number),))
+            except Exception:
+                pass
+
+        # 4) Optional audit
+        try:
+            c.execute("INSERT INTO deletion_log (member_id, action) VALUES (?, 'permanent_delete')", (member_id,))
+        except Exception:
+            pass
