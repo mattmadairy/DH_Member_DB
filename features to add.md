@@ -8,7 +8,6 @@ full member report - save option
 export works, but needs auto-population of file name. get rid of confirmation dialogue box.
 test import & refactor
 
-column sorting on all functions
 
 font enlarge, window opening positions, background images, destroy_window changes.
 future integration with data captured from the card reader system. 

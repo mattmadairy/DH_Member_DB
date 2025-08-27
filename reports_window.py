@@ -92,15 +92,50 @@ class BaseReport(tk.Frame):
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
-        # alignment rules for Treeview
+        # Alignment rules
         for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_"," ").title())
+            self.tree.heading(col, text=col.replace("_"," ").title(),
+                              command=lambda c=col: self.sort_column(c, False))
             if col in ("badge", "year", "method", "last_payment_date"):
                 self.tree.column(col, width=width, anchor="center")
-            elif col in ("amount_due", "balance_due", "amount_paid"):
+            elif col in ("amount_due", "balance_due", "amount_paid", "work_hours"):
                 self.tree.column(col, width=width, anchor="e")
             else:
                 self.tree.column(col, width=width, anchor="w")
+
+        self._sort_column = None
+        self._sort_reverse = False
+
+    def sort_column(self, col, reverse):
+        # Extract data
+        data = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+        
+        # Detect numeric columns
+        def try_num(val):
+            try:
+                return float(val)
+            except ValueError:
+                return val
+
+        data.sort(key=lambda t: try_num(t[0]), reverse=reverse)
+
+        # Rearrange rows
+        for index, (_, k) in enumerate(data):
+            self.tree.move(k, "", index)
+
+        # Reset all headings
+        for c in self.columns:
+            self.tree.heading(c, text=c.replace("_"," ").title(),
+                              command=lambda _c=c: self.sort_column(_c, False))
+
+        # Apply arrow
+        arrow = " ▲" if not reverse else " ▼"
+        self.tree.heading(col, text=col.replace("_"," ").title() + arrow,
+                          command=lambda: self.sort_column(col, not reverse))
+
+        # Track current sort
+        self._sort_column = col
+        self._sort_reverse = reverse
 
     def export_csv(self):
         items = self.tree.get_children()
@@ -256,12 +291,13 @@ class BaseReport(tk.Frame):
 # ---------------- Dues Report ---------------- #
 class DuesReport(BaseReport):
     def __init__(self, parent, member_id=None):
-        self.columns = ("badge_number", "name", "membership_type", "amount_due", "balance_due",
+        self.columns = ("badge", "name", "membership_type", "amount_due", "balance_due",
                         "year", "last_payment_date", "amount_paid", "method")
         self.column_widths = (60, 150, 110, 80, 80, 60, 120, 80, 80)
         super().__init__(parent, member_id, include_month=False)
         self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="dues"))
         self.populate_report()
+
 
     def populate_report(self):
         for row in self.tree.get_children():

@@ -9,8 +9,6 @@ from datetime import datetime
 import tempfile
 
 
-
-
 class MemberApp:
     TREE_COLUMNS = (
         "Badge", "Last Name", "First Name", "Membership Type",
@@ -119,8 +117,10 @@ class MemberApp:
         container.grid_columnconfigure(0, weight=1)
 
         tree = ttk.Treeview(container, columns=columns, show="headings", selectmode="extended")
+        self._sort_column_states = {}  # Keep track of sort order per column
+
         for col in columns:
-            tree.heading(col, text=col)
+            tree.heading(col, text=col, command=lambda c=col, t=tree: self._sort_tree_column(t, c, False))
             tree.column(col, width=120, anchor="w")
             if col == "Badge":
                 tree.column(col, width=80, anchor="center")
@@ -133,9 +133,41 @@ class MemberApp:
         tree.grid(row=0, column=0, sticky="nsew")
         return tree
 
+    def _sort_tree_column(self, tree, col, reverse):
+        """Sort tree contents by column and update header arrows."""
+        try:
+            # Get all rows and the values in the given column
+            data = [(tree.set(k, col), k) for k in tree.get_children("")]
+            
+            # Try converting values to numbers if possible, otherwise lowercase string
+            def try_convert(val):
+                try:
+                    return float(val)
+                except ValueError:
+                    return val.lower()
+            data.sort(key=lambda t: try_convert(t[0]), reverse=reverse)
+
+            # Rearrange items in sorted order
+            for index, (val, k) in enumerate(data):
+                tree.move(k, "", index)
+
+            # Reset all headings to plain text
+            for c in tree["columns"]:
+                tree.heading(c, text=c, command=lambda c=c, t=tree: self._sort_tree_column(t, c, False))
+
+            # Add arrow to the sorted column
+            arrow = " ▲" if not reverse else " ▼"
+            tree.heading(col, text=col + arrow,
+                         command=lambda: self._sort_tree_column(tree, col, not reverse))
+
+        except Exception as e:
+            pass
+            #messagebox.showerror("Sort Error", f"Failed to sort column {col}: {e}")
+
+
     # ---------- Member Management ----------
     def add_member(self):
-        form = member_form.NewMemberForm(self.root, on_save_callback=self.load_data)
+        form = NewMemberForm(self.root, on_save_callback=self.load_data)
         self.root.wait_window(form.top)
 
     def edit_selected(self):
