@@ -4,6 +4,7 @@ import csv
 import database
 import calendar
 from datetime import datetime
+from member_form import MemberForm
 
 class ReportsWindow(tk.Toplevel):
     def __init__(self, parent, member_id=None):
@@ -29,6 +30,7 @@ class ReportsWindow(tk.Toplevel):
         notebook.add(attendance_tab, text="Attendance")
         AttendanceReport(attendance_tab, member_id).pack(fill="both", expand=True)
 
+
 # ---------------- Base Report ---------------- #
 class BaseReport(tk.Frame):
     """Base class with common controls for member/year/month filters and CSV export"""
@@ -41,8 +43,7 @@ class BaseReport(tk.Frame):
         self.tree = None
         self._setup_controls()
         self._create_tree()
-        self.tree.bind("<Double-1>", self.on_double_click)
-
+        
 
     def _setup_controls(self):
         frame = tk.Frame(self)
@@ -67,8 +68,15 @@ class BaseReport(tk.Frame):
             month_cb.configure(background="white")
             self.month_var.trace_add("write", lambda *args: self.populate_report())
 
+
         tk.Button(frame, text="Export CSV", command=self.export_csv).pack(side="left", padx=5)
         tk.Button(frame, text="Print Report", command=self.print_report).pack(side="left", padx=5)
+
+        # Checkbox to exclude names
+        self.exclude_names_var = tk.BooleanVar(value=False)
+        cb = ttk.Checkbutton(frame, text="Exclude Names From Print", variable=self.exclude_names_var)
+        cb.pack(side="left", padx=10)
+
 
     def _create_tree(self):
         frame = tk.Frame(self)
@@ -170,7 +178,13 @@ class BaseReport(tk.Frame):
         row_count = 0
 
         for item in items:
-            row = self.tree.item(item, "values")
+            row = list(self.tree.item(item, "values"))
+            # Replace names with "*****" if checkbox is selected
+            if self.exclude_names_var.get():
+                # Assume the "name" column is index 1
+                if len(row) > 1:
+                    row[1] = "*****"
+
             line = ""
             for col, val, w in zip(self.columns, row, col_widths):
                 val = str(val)
@@ -217,35 +231,26 @@ class BaseReport(tk.Frame):
     def populate_report(self):
         raise NotImplementedError("populate_report must be implemented in subclass")
 
-    def on_double_click(self, event):
-        """Open member form when a row is double-clicked."""
+    def on_double_click(self, event, report_type=None):
         selected = self.tree.selection()
         if not selected:
             return
 
-        values = self.tree.item(selected[0], "values")
-        if not values:
-            return
+        badge_number = self.tree.item(selected[0], "values")[0]
+        member = database.get_member_by_badge(badge_number)
+        if member:
+            member_id = member[0]
 
-        # Assume "badge" is always first column
-        badge = values[0]
+            # Map report type to the desired tab
+            tab_for_report = {
+                "dues": "dues",
+                "work_hours": "work_hours",
+                "attendance": "attendance"
+            }
 
-        try:
-            member = database.get_member_by_badge(badge)  # <-- you'll need this helper
-            if member:
-                member_id = member[0]  # assuming first col is id
-                from member_form import MemberForm
-                form = MemberForm(self, member_id=member_id)
+            selected_tab = tab_for_report.get(report_type, "basic")
 
-                # Center on screen
-                form.update_idletasks()
-                w, h = form.winfo_width(), form.winfo_height()
-                x = (form.winfo_screenwidth() // 2) - (w // 2)
-                y = (form.winfo_screenheight() // 2) - (h // 2)
-                form.geometry(f"{w}x{h}+{x}+{y}")
-                form.deiconify()
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not open member form:\n{e}")
+            MemberForm(self, member_id=member_id, select_tab=selected_tab)
 
 
 # ---------------- Dues Report ---------------- #
@@ -255,6 +260,7 @@ class DuesReport(BaseReport):
                         "year", "last_payment_date", "amount_paid", "method")
         self.column_widths = (60, 150, 110, 80, 80, 60, 120, 80, 80)
         super().__init__(parent, member_id, include_month=False)
+        self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="dues"))
         self.populate_report()
 
     def populate_report(self):
@@ -322,11 +328,13 @@ class DuesReport(BaseReport):
         except Exception as e:
             messagebox.showerror("Dues Report", f"Failed to fetch dues data:\n{e}")
 
+# ---------------- Work Hours Report ---------------- #
 class Work_HoursReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "work_hours")
         self.column_widths = (10, 260, 120)
         super().__init__(parent, member_id)
+        self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="work_hours"))
         self.populate_report()
 
     def populate_report(self):
@@ -352,11 +360,13 @@ class Work_HoursReport(BaseReport):
         except Exception as e:
             messagebox.showerror("Work Hours Report", f"Failed to fetch work hours data:\n{e}")
 
+# ---------------- Attendance Report ---------------- #
 class AttendanceReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "status")
         self.column_widths = (90, 260, 120)
         super().__init__(parent, member_id)
+        self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="attendance"))
         self.populate_report()
 
     def populate_report(self):

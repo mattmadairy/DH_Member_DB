@@ -1,11 +1,14 @@
 
-main gui print formatting format gui tab print screen - solve wrapping issue & double spacing. wrapping poss coming from margins on page
+main gui print formatting format gui tab print screen - solve wrapping issue & double spacing. 
 
-full member report - open print dialogue 
+full member report - open print dialogue instead of auto-print
 full member report - allow changing of year 
-full member report - double spacing on dues. 
 full member report - save option
-double click on report entries to open appropriate tab in member form
+
+export works, but needs auto-population of file name. get rid of confirmation dialogue box.
+test import & refactor
+
+column sorting on all functions
 
 font enlarge, window opening positions, background images, destroy_window changes.
 future integration with data captured from the card reader system. 

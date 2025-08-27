@@ -76,8 +76,8 @@ class DataTab:
 
 
 # ----------------------- Member Form -----------------------
-class MemberForm:
-    def __init__(self, parent, member_id=None, on_save_callback=None):
+class MemberForm(tk.Frame):
+    def __init__(self, parent, member_id=None, on_save_callback=None, select_tab=None):
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
         self.member_id = member_id
@@ -108,6 +108,19 @@ class MemberForm:
         self.notebook.add(self.tab_dues, text="Dues History")
         self.notebook.add(self.tab_work_hours, text="Work Hours")
         self.notebook.add(self.tab_attendance, text="Meeting Attendance")
+
+                # After loading data, select the requested tab
+        if select_tab:
+            tab_mapping = {
+                "basic": self.tab_basic,
+                "contact": self.tab_contact,
+                "membership": self.tab_membership,
+                "dues": self.tab_dues,
+                "work_hours": self.tab_work_hours,
+                "attendance": self.tab_attendance
+            }
+            if select_tab in tab_mapping:
+                self.notebook.select(tab_mapping[select_tab])
 
         # ----- Resize Tabs -----
         def resize_tabs(event=None):

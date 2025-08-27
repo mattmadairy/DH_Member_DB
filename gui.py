@@ -6,6 +6,7 @@ import member_form
 import settings_window
 from reports_window import ReportsWindow
 from datetime import datetime
+import tempfile
 
 
 
@@ -214,8 +215,6 @@ class MemberApp:
         self._full_member_report(member_id)
 
 
-
-
     def _full_member_report(self, member_id):
         """Display a full member report for a single member."""
         try:
@@ -301,41 +300,70 @@ class MemberApp:
                 row_lines.append(line.rstrip())
 
             row_lines.append("")  # empty line after each block row
-            row_lines.append("") 
 
 
         # -------- Dues Section -------- #
+        row_lines.append("=" * page_width)
         row_lines.append("  Dues History".ljust(page_width))
         dues = database.get_dues_by_member(member_id)
+
         if dues:
-            row_lines.append(f"{'Payment Date'.ljust(14)}{'Year'.ljust(6)}{'Amount'.ljust(10)}{'Method'.ljust(15)}{'Notes'.ljust(40)}")
+            # Determine max width for each column
+            headers = ["Payment Date", "Year", "Amount", "Method", "Notes"]
+            # Start with header widths
+            col_widths = [len(h) for h in headers]
+
+            # Update widths based on data
+            for row in dues:
+                payment_date = (row[2] or "N/A").strip()
+                year = str(row[3] or "N/A").strip()
+                amount = f"{float(row[4] or 0.0):.2f}"
+                method = (row[5] or "").strip()
+                notes = (row[6] or "").strip()
+
+                values = [payment_date, year, amount, method, notes]
+                for i, val in enumerate(values):
+                    if len(val) > col_widths[i]:
+                        col_widths[i] = len(val)
+
+            # Optional: limit Notes column so it doesn't exceed a max width
+            max_notes_width = 40
+            if col_widths[4] > max_notes_width:
+                col_widths[4] = max_notes_width
+
+            # Header line
+            header_line = "".join(h.ljust(w + 2) for h, w in zip(headers, col_widths))
+            row_lines.append(header_line)
+            row_lines.append("-" * page_width)
+
             total_dues = 0.0
             for row in dues:
-                payment_date = row[2]
-                if payment_date:
-                    try:
-                        payment_date = datetime.strptime(payment_date, "%Y-%m-%d").strftime("%m-%d-%Y")
-                    except ValueError:
-                        pass
-                else:
-                    payment_date = "N/A"
-                year = str(row[3] or "N/A")
+                payment_date = (row[2] or "N/A").strip()
+                year = str(row[3] or "N/A").strip()
                 amount = float(row[4] or 0.0)
                 total_dues += amount
-                method = str(row[5] or "")
-                notes = str(row[6] or "")
-                line = f"{payment_date.ljust(14)}{year.ljust(6)}{f'{amount:.2f}'.ljust(10)}{method.ljust(15)}{notes.ljust(40)}"
+                method = (row[5] or "").strip()
+                notes = (row[6] or "").strip()
+
+                # Truncate notes if too long
+                if len(notes) > col_widths[4]:
+                    notes = notes[:col_widths[4]-3] + "..."
+
+                values = [payment_date, year, f"{amount:.2f}", method, notes]
+                line = "".join(val.ljust(w + 2) for val, w in zip(values, col_widths))
                 row_lines.append(line)
+
             row_lines.append("-" * page_width)
             row_lines.append(f"Total Dues: ${total_dues:.2f}".ljust(page_width))
+
         else:
+            row_lines.append("-" * page_width)
             row_lines.append("No dues recorded".ljust(page_width))
             row_lines.append("-" * page_width)
 
-        row_lines.append("")
-        row_lines.append("")
 
         # -------------------- Work Hours Section -------------------- #
+        row_lines.append("=" * page_width)
         row_lines.append("  Work Hours".ljust(page_width))
         work_hours = database.get_work_hours_by_member(member_id)
         if work_hours:
@@ -356,14 +384,14 @@ class MemberApp:
             row_lines.append("-" * page_width)
             row_lines.append(f"Total Work Hours: {total_hours}".ljust(page_width))
         else:
+            row_lines.append("-" * page_width)
             row_lines.append("No work hours reported".ljust(page_width))
             row_lines.append("-" * page_width)
             row_lines.append(f"Total Work Hours: 0".ljust(page_width))
 
-        row_lines.append("")
-        row_lines.append("")
 
         # -------------------- Attendance -------------------- #
+        row_lines.append("=" * page_width)
         row_lines.append("  Meeting Attendance".ljust(page_width))
         attendance = database.get_meeting_attendance(member_id)
         if attendance:
@@ -382,8 +410,9 @@ class MemberApp:
                 total_meetings += 1
             row_lines.append("-" * page_width)
             row_lines.append(f"Total Meetings Attended: {total_meetings}".ljust(page_width))
-            row_lines.append("" * page_width)
+
         else:
+            row_lines.append("-" * page_width)
             row_lines.append("No attendance recorded".ljust(page_width))
             row_lines.append("-" * page_width)
             row_lines.append(f"Total Meetings Attended: 0".ljust(page_width))
@@ -439,7 +468,7 @@ class MemberApp:
 
         btn_frame = ttk.Frame(preview)
         btn_frame.pack(fill="x", pady=5)
-        ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=10)
+
 
         def print_text():
             try:
@@ -447,6 +476,7 @@ class MemberApp:
                 temp_file = tempfile.mktemp(".txt")
                 with open(temp_file, "w") as f:
                     f.write(report_text)
+                # Automatically send to printer
                 os.startfile(temp_file, "print")
             except Exception as e:
                 messagebox.showerror("Print Error", f"Failed to print: {e}")
