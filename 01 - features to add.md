@@ -8,6 +8,11 @@ full member report - save as pdf functionality. button currently creates a txt f
 
 background images
 icon images
+waivers - report works, need to figure out whether or not to use year.
+
+roles
+committees
+
 
 future integration with data captured from the card reader system. 
 

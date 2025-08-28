@@ -10,10 +10,12 @@ conn = None
 def get_connection():
     try:
         conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row  # ← allows access by column name
         return conn
     except sqlite3.Error as e:
         print(f"Connection error: {e}")
         return None
+
     
 # ------------------ Initialization ----------------- #
 def init_members_table():
@@ -21,7 +23,7 @@ def init_members_table():
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY,
             badge_number TEXT,
             membership_type TEXT,
             first_name TEXT,
@@ -38,7 +40,9 @@ def init_members_table():
             sponsor TEXT,
             card_internal TEXT,
             card_external TEXT,
-            deleted INTEGER DEFAULT 0
+            phone2 TEXT,
+            waiver TEXT DEFAULT 'No',
+            deleted_at TEXT
         )
     """)
     conn.commit()
@@ -139,6 +143,8 @@ def init_deleted_members_table():
             sponsor TEXT,
             card_internal TEXT,
             card_external TEXT,
+            phone2 TEXT,
+            waiver TEXT DEFAULT 'No',
             deleted_at TEXT
         )
     """)
@@ -237,16 +243,27 @@ def update_member_contact(member_id, email, email2, phone, address, city, state,
     conn.commit()
     conn.close()
 
-def update_member_membership(member_id, badge_number, membership_type, join_date, sponsor, card_internal, card_external):
+def update_member_membership(member_id, badge_number, membership_type, join_date,
+                             sponsor, card_internal, card_external, phone2="", waiver="No"):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
         UPDATE members
-        SET badge_number=?, membership_type=?, join_date=?, sponsor=?, card_internal=?, card_external=?
+        SET badge_number=?,
+            membership_type=?,
+            join_date=?,
+            sponsor=?,
+            card_internal=?,
+            card_external=?,
+            phone2=?,
+            waiver=?
         WHERE id=?
-    """, (badge_number, membership_type, join_date, sponsor, card_internal, card_external, member_id))
+    """, (badge_number, membership_type, join_date, sponsor, card_internal,
+          card_external, phone2, waiver, member_id))
     conn.commit()
     conn.close()
+
+
 
 def delete_member(member_id):
     conn = get_connection()
@@ -1113,3 +1130,25 @@ def permanently_delete_member_by_id(member_id):
             c.execute("INSERT INTO deletion_log (member_id, action) VALUES (?, 'permanent_delete')", (member_id,))
         except Exception:
             pass
+
+
+def get_waiver_report():
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT badge_number, first_name || ' ' || last_name AS name, waiver
+        FROM members
+        ORDER BY badge_number
+    """
+    
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+    
+    # convert sqlite3.Row objects to dictionaries
+    return [dict(row) for row in rows]

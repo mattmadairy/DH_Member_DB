@@ -1,11 +1,15 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
+import tkinter.font as tkFont
 import os
 import database
 from datetime import datetime
 import csv
 import calendar
 
+DATE_FMT = "%m/%d/%Y"
+STATUS_OPTIONS = ["Attended", "Exemption Approved"]
+METHOD_OPTIONS = ["Cash", "Check", "Electronic"]
 
 # Add this utility function near the top of your code
 def center_window(window, width=None, height=None, parent=None):
@@ -519,12 +523,17 @@ class MemberApp:
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
         generated_text = f"Generated: {generation_dt}"
 
-        headers = [tree.heading(c)["text"] for c in self.TREE_COLUMNS]
+        # --- remove Email2 / Email Address 2 ---
+        print_columns = [c for c in self.TREE_COLUMNS if c.lower() not in ("email2", "email address 2")]
+
+        headers = [tree.heading(c)["text"] for c in print_columns]
         max_total_width = 100
         col_widths = [len(h) for h in headers]
-        for idx, col in enumerate(self.TREE_COLUMNS):
+
+        # adjust widths
+        for idx, col in enumerate(print_columns):
             for item in items:
-                value = str(tree.item(item, "values")[idx])
+                value = str(tree.item(item, "values")[self.TREE_COLUMNS.index(col)])
                 if len(value) > col_widths[idx]:
                     col_widths[idx] = len(value)
 
@@ -533,24 +542,29 @@ class MemberApp:
             scale = (max_total_width - 2 * len(col_widths)) / sum(col_widths)
             col_widths = [max(4, int(w * scale)) for w in col_widths]
 
+        # rows
         rows = []
         for item in items:
             row = []
-            for idx, col in enumerate(self.TREE_COLUMNS):
-                value = str(tree.item(item, "values")[idx])
+            values = tree.item(item, "values")
+            for idx, col in enumerate(print_columns):
+                value = str(values[self.TREE_COLUMNS.index(col)])
                 if col == "Badge":
                     row.append(value.center(col_widths[idx]))
                 else:
                     row.append(value.ljust(col_widths[idx]))
             rows.append("  ".join(row))
 
+        # pagination
         lines_per_page = 40
         total_pages = (len(rows) - 1) // lines_per_page + 1
         pages = [rows[i:i + lines_per_page] for i in range(0, len(rows), lines_per_page)]
 
         preview_text = ""
-        header_line = "  ".join([h.center(col_widths[idx]) if self.TREE_COLUMNS[idx] == "Badge" else h.ljust(col_widths[idx])
-                                for idx, h in enumerate(headers)])
+        header_line = "  ".join(
+            [h.center(col_widths[idx]) if print_columns[idx] == "Badge" else h.ljust(col_widths[idx])
+            for idx, h in enumerate(headers)]
+        )
         total_members_text = f"Total Members: {len(items)}".center(len(header_line))
 
         for current_page, page_lines in enumerate(pages, start=1):
@@ -566,6 +580,24 @@ class MemberApp:
 
         preview = tk.Toplevel(self.root)
         preview.title(f"Print Preview - {current_tab}")
+
+        # --- Dynamically size window based on text ---
+        preview.update_idletasks()
+
+        text_width = max(len(line) for line in preview_text.splitlines()) if preview_text else 80
+        text_height = min(len(preview_text.splitlines()), 50)  # cap height at 50 lines
+
+        # Courier font is about 8px wide, ~18px tall
+        win_width = min(1200, text_width * 8)
+        win_height = min(900, text_height * 18)
+
+        # Add space for buttons + scrollbars
+        win_height += 100   # room for buttons + horizontal scrollbar
+        win_width += 50     # room for vertical scrollbar
+
+        # Use your existing helper to center the window
+        center_window(preview, width=win_width, height=win_height, parent=self.root)
+
         text_frame = ttk.Frame(preview)
         text_frame.pack(fill="both", expand=True)
         text = tk.Text(text_frame, wrap="none")
@@ -581,6 +613,7 @@ class MemberApp:
 
         btn_frame = ttk.Frame(preview)
         btn_frame.pack(fill="x", pady=5)
+        
         def print_text():
             import tempfile
             temp_file = tempfile.mktemp(".txt")
@@ -727,23 +760,44 @@ class NewMemberForm:
     def __init__(self, parent, on_save_callback=None):
         self.top = tk.Toplevel(parent)
         self.top.title("Add New Member")
-        center_window(self.top, 400, 450, parent)  # <-- Center popup relative to parent
+        center_window(self.top, 450, 500, parent)  # Center popup
         self.on_save_callback = on_save_callback
 
         self.entries = {}
+        self.waiver_var = tk.BooleanVar()
+
+        # Define fields in logical order: badge -> membership -> names -> contact -> other
         fields = [
-            "Badge", "Membership Type", "First Name", "Last Name", "Date of Birth",
-            "Email Address", "Phone Number", "Address", "City", "State", "Zip Code",
-            "Join Date", "Email Address 2", "Sponsor", "Card/Fob Internal Number",
-            "Card/Fob External Number"
+            "Badge",
+            "Membership Type",
+            "First Name",
+            "Last Name",
+            "Date of Birth",
+            "Email Address",
+            "Email Address 2",
+            "Phone Number",
+            "Phone Number 2",
+            "Address",
+            "City",
+            "State",
+            "Zip Code",
+            "Join Date",
+            "Sponsor",
+            "Card/Fob Internal Number",
+            "Card/Fob External Number",
+            "Waiver Signed"
         ]
 
         for idx, field in enumerate(fields):
             tk.Label(self.top, text=field).grid(row=idx, column=0, sticky="e", padx=5, pady=2)
+
             if field == "Membership Type":
                 cb = ttk.Combobox(self.top, values=self.MEMBERSHIP_TYPES, state="readonly")
                 cb.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
                 self.entries[field] = cb
+            elif field == "Waiver Signed":
+                cb = tk.Checkbutton(self.top, variable=self.waiver_var)
+                cb.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
             else:
                 entry = tk.Entry(self.top)
                 entry.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
@@ -762,16 +816,18 @@ class NewMemberForm:
             self.entries["Last Name"].get().strip(),
             self.entries["Date of Birth"].get().strip(),
             self.entries["Email Address"].get().strip(),
+            self.entries["Email Address 2"].get().strip(),
             self.entries["Phone Number"].get().strip(),
+            self.entries["Phone Number 2"].get().strip(),
             self.entries["Address"].get().strip(),
             self.entries["City"].get().strip(),
             self.entries["State"].get().strip(),
             self.entries["Zip Code"].get().strip(),
             self.entries["Join Date"].get().strip(),
-            self.entries["Email Address 2"].get().strip(),
             self.entries["Sponsor"].get().strip(),
             self.entries["Card/Fob Internal Number"].get().strip(),
-            self.entries["Card/Fob External Number"].get().strip()
+            self.entries["Card/Fob External Number"].get().strip(),
+            self.waiver_var.get()  # boolean
         )
 
         if not data[0] or not data[2] or not data[3]:  # Badge, First Name, Last Name
@@ -785,6 +841,7 @@ class NewMemberForm:
             self.top.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add member: {e}")
+
 
 
 class RecycleBinWindow:
@@ -968,12 +1025,6 @@ class SettingsWindow(tk.Toplevel):
             messagebox.showerror("Error", "Please enter valid numbers for dues and year.")
 
 
-
-DATE_FMT = "%m/%d/%Y"
-STATUS_OPTIONS = ["Attended", "Exemption Approved"]
-METHOD_OPTIONS = ["Cash", "Check", "Electronic"]
-
-
 class DataTab:
     def __init__(self, parent, columns, db_load_func, db_add_func, db_update_func, db_delete_func,
                  entry_fields, row_adapter=None):
@@ -994,7 +1045,7 @@ class DataTab:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=120, anchor="w")
         self.tree.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
-        #self.tree.bind("<Double-1>", self.edit_record)
+        
         self.member_id = None
 
     def load_records(self, member_id):
@@ -1044,37 +1095,19 @@ class DataTab:
 # ----------------------- Member Form -----------------------
 class MemberForm(tk.Frame):
     def __init__(self, parent, member_id=None, on_save_callback=None, select_tab=None):
-        
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
 
-        # ----- Set reasonable default size first -----
         default_width = 850
         default_height = 400
         self.top.geometry(f"{default_width}x{default_height}")
 
-        # ----- Force Tkinter to compute natural size -----
-        self.top.update_idletasks()
-        natural_width = self.top.winfo_width()
-        natural_height = self.top.winfo_height()
-        width = max(default_width, natural_width)
-        height = max(default_height, natural_height)
-        self.top.geometry(f"{width}x{height}")
-
-        # ----- Center the window on the screen -----
-        center_window(self.top, width, height)
-
         self.member_id = member_id
         self.on_save_callback = on_save_callback
 
-        # ----- Notebook ----- 
+        # ----- Notebook -----
         style = ttk.Style(self.top)
-        style.configure(
-            "CustomNotebook.TNotebook.Tab",
-            padding=[12, 5],
-            anchor="center"
-        )
-
+        style.configure("CustomNotebook.TNotebook.Tab", padding=[12, 5], anchor="center")
         self.notebook = ttk.Notebook(self.top, style="CustomNotebook.TNotebook")
         self.notebook.pack(fill="both", expand=True)
 
@@ -1093,7 +1126,6 @@ class MemberForm(tk.Frame):
         self.notebook.add(self.tab_work_hours, text="Work Hours")
         self.notebook.add(self.tab_attendance, text="Meeting Attendance")
 
-        # ----- Select requested tab if provided -----
         if select_tab:
             tab_mapping = {
                 "basic": self.tab_basic,
@@ -1106,18 +1138,6 @@ class MemberForm(tk.Frame):
             if select_tab in tab_mapping:
                 self.notebook.select(tab_mapping[select_tab])
 
-        # ----- Resize tabs dynamically -----
-        def resize_tabs(event=None):
-            total_tabs = len(self.notebook.tabs())
-            if total_tabs == 0:
-                return
-            notebook_width = self.notebook.winfo_width()
-            tab_width = min(150, notebook_width // total_tabs)
-            style.configure("CustomNotebook.TNotebook.Tab", width=tab_width)
-
-        resize_tabs()
-        self.notebook.bind("<Configure>", resize_tabs)
-
         # ----- Variables -----
         self.badge_number_var = tk.StringVar()
         self.membership_type_var = tk.StringVar()
@@ -1125,16 +1145,18 @@ class MemberForm(tk.Frame):
         self.last_name_var = tk.StringVar()
         self.dob_var = tk.StringVar()
         self.email_var = tk.StringVar()
+        self.email2_var = tk.StringVar()
         self.phone_var = tk.StringVar()
+        self.phone2_var = tk.StringVar()
         self.address_var = tk.StringVar()
         self.city_var = tk.StringVar()
         self.state_var = tk.StringVar()
         self.zip_var = tk.StringVar()
         self.join_date_var = tk.StringVar()
-        self.email2_var = tk.StringVar()
         self.sponsor_var = tk.StringVar()
         self.card_internal_var = tk.StringVar()
         self.card_external_var = tk.StringVar()
+        self.waiver_var = tk.StringVar()  # stores "Yes"/"No"
         self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
 
         self._display_labels = {}
@@ -1150,6 +1172,7 @@ class MemberForm(tk.Frame):
             ("Email Address", self.email_var),
             ("Email Address 2", self.email2_var),
             ("Phone Number", self.phone_var),
+            ("Phone Number 2", self.phone2_var),
             ("Address", self.address_var),
             ("City", self.city_var),
             ("State", self.state_var),
@@ -1162,7 +1185,8 @@ class MemberForm(tk.Frame):
             ("Join Date", self.join_date_var),
             ("Sponsor", self.sponsor_var),
             ("Card/Fob Internal Number", self.card_internal_var),
-            ("Card/Fob External Number", self.card_external_var)
+            ("Card/Fob External Number", self.card_external_var),
+            ("Waiver Signed", self.waiver_var)
         ], self._edit_membership, "membership")
 
         # ----- Data tabs -----
@@ -1170,71 +1194,68 @@ class MemberForm(tk.Frame):
         self.work_tab = WorkHoursTab(self.tab_work_hours, self.member_id)
         self.attendance_tab = AttendanceTab(self.tab_attendance, self.member_id)
 
-        # ----- Load member data if ID provided -----
         if self.member_id:
             self._load_member_data()
 
-
-        # ----- Set reasonable default window size -----
-        self.top.update_idletasks()  # calculate natural size
-        natural_width = self.top.winfo_width()
-        natural_height = self.top.winfo_height()
-        width = max(850, min(natural_width, 1000))  # limit max width
-        height = max(300, natural_height)
+        # ----- Window size -----
+        self.top.update_idletasks()
+        width = max(850, min(self.top.winfo_width(), 1000))
+        height = max(300, self.top.winfo_height())
         self.top.geometry(f"{width}x{height}")
+        center_window(self.top, width, height)
 
-
-
+    # ----- Read-only tab builder -----
     def _build_read_only_tab(self, tab, fields, edit_callback, tab_key):
-        tab.grid_columnconfigure(0, weight=1)  # left column stretches
-        tab.grid_columnconfigure(1, weight=1)  # right column stretches
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=1)
 
         self._display_labels[tab_key] = {}
-
-        # Define a larger font (adjust size as needed)
         big_font = font.nametofont("TkDefaultFont").copy()
-        big_font.configure(size=12, weight="bold")   # e.g., bigger and bold
+        big_font.configure(size=12, weight="bold")
         label_font = font.nametofont("TkDefaultFont").copy()
         label_font.configure(size=12)
 
         for idx, (label_text, var) in enumerate(fields):
-            ttk.Label(
-                tab, text=label_text + ":", font=big_font
-            ).grid(row=idx, column=0, sticky="e", padx=5, pady=4)
-
-            lbl = ttk.Label(tab, text=var.get(), font=label_font)
+            ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=idx, column=0, sticky="e", padx=5, pady=4)
+            display_val = var.get()
+            lbl = ttk.Label(tab, text=display_val, font=label_font)
             lbl.grid(row=idx, column=1, sticky="w", padx=5, pady=4)
-
             self._display_labels[tab_key][label_text] = (lbl, var)
 
-        ttk.Button(tab, text="Edit", command=edit_callback).grid(
-            row=len(fields), column=0, columnspan=2, pady=12
-        )
-        
+        ttk.Button(tab, text="Edit", command=edit_callback).grid(row=len(fields), column=0, columnspan=2, pady=12)
+
+    # ----- Load member data -----
     def _load_member_data(self):
         if not self.member_id:
             return
+
+        # Fetch member record
         m = database.get_member_by_id(self.member_id)
         if not m:
             return
+
+        # Map DB columns to form variables using column names
         mapping = {
-            "badge_number": m[1],
-            "membership_type": m[2],
-            "first_name": m[3],
-            "last_name": m[4],
-            "dob": m[5],
-            "email": m[6],
-            "phone": m[7],
-            "address": m[8],
-            "city": m[9],
-            "state": m[10],
-            "zip": m[11],
-            "join_date": m[12],
-            "email2": m[13],
-            "sponsor": m[14],
-            "card_internal": m[15],
-            "card_external": m[16]
+            "badge_number": m["badge_number"],
+            "membership_type": m["membership_type"],
+            "first_name": m["first_name"],
+            "last_name": m["last_name"],
+            "dob": m["dob"],
+            "email": m["email"],
+            "phone": m["phone"],
+            "address": m["address"],
+            "city": m["city"],
+            "state": m["state"],
+            "zip": m["zip"],
+            "join_date": m["join_date"],
+            "email2": m["email2"],
+            "phone2": m["phone2"] if "phone2" in m.keys() and m["phone2"] else "",
+            "sponsor": m["sponsor"],
+            "card_internal": m["card_internal"],
+            "card_external": m["card_external"],
+            "waiver": m["waiver"] if "waiver" in m.keys() and m["waiver"] else "No"
         }
+
         for var_name, value in mapping.items():
             var = getattr(self, f"{var_name}_var", None)
             if var:
@@ -1246,6 +1267,7 @@ class MemberForm(tk.Frame):
                         var.set(value)
                 else:
                     var.set(value or "")
+
         # Update read-only labels
         for tab_labels in self._display_labels.values():
             for lbl, var in tab_labels.values():
@@ -1254,8 +1276,11 @@ class MemberForm(tk.Frame):
         # Load data tabs
         self.work_tab.load_records(self.member_id)
         self.attendance_tab.load_records(self.member_id)
+        self.dues_tab.load_records(self.member_id)
 
-    # --- Edit callbacks ---
+
+
+    # ----- Edit callbacks -----
     def _edit_basic(self):
         self._open_edit_popup_generic("Basic Info", [
             ("First Name", self.first_name_var),
@@ -1268,6 +1293,7 @@ class MemberForm(tk.Frame):
             ("Email Address", self.email_var),
             ("Email Address 2", self.email2_var),
             ("Phone Number", self.phone_var),
+            ("Phone Number 2", self.phone2_var),
             ("Address", self.address_var),
             ("City", self.city_var),
             ("State", self.state_var),
@@ -1281,55 +1307,52 @@ class MemberForm(tk.Frame):
             ("Join Date", self.join_date_var),
             ("Sponsor", self.sponsor_var),
             ("Card/Fob Internal Number", self.card_internal_var),
-            ("Card/Fob External Number", self.card_external_var)
+            ("Card/Fob External Number", self.card_external_var),
+            ("Waiver Signed", self.waiver_var)
         ], self._save_membership)
 
+    # ----- Generic popup editor -----
     def _open_edit_popup_generic(self, title, field_names, save_callback):
-        popup = tk.Toplevel()
+        popup = tk.Toplevel(self.top)
         popup.title(title)
-
-        # Make a frame to contain all widgets and center them
         frame = ttk.Frame(popup, padding=10)
         frame.pack(fill="both", expand=True)
-
-        # Configure columns so labels are right-aligned, entries expand
         frame.columnconfigure(0, weight=1, uniform="a")
         frame.columnconfigure(1, weight=2, uniform="a")
 
         editors = []
         for i, (label, var) in enumerate(field_names):
             ttk.Label(frame, text=label + ":", font=("Arial", 12)).grid(row=i, column=0, padx=5, pady=3, sticky="e")
-            entry_var = tk.StringVar(value=var.get())
-
-            # Use Combobox for Membership Type
-            if label == "Membership Type":
-                w = ttk.Combobox(frame, textvariable=entry_var,
-                                values=self.membership_types, state="readonly", font=("Arial", 12))
+            if label == "Waiver Signed":
+                entry_var = tk.StringVar(value=var.get())
+                w = ttk.Combobox(frame, textvariable=entry_var, values=["Yes", "No"], state="readonly", font=("Arial", 12))
+            elif label == "Membership Type":
+                entry_var = tk.StringVar(value=var.get())
+                w = ttk.Combobox(frame, textvariable=entry_var, values=self.membership_types, state="readonly", font=("Arial", 12))
             else:
+                entry_var = tk.StringVar(value=var.get())
                 w = ttk.Entry(frame, textvariable=entry_var, font=("Arial", 12))
-
             w.grid(row=i, column=1, padx=5, pady=3, sticky="ew")
             editors.append((var, entry_var))
 
-        # Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=len(field_names), column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="Save", command=lambda: save()).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Cancel", command=popup.destroy).pack(side="left", padx=5)
 
         def save():
-            for var, entry_var in editors:
-                var.set(entry_var.get())
+            for (var, entry_var), (label, _) in zip(editors, field_names):
+                if label == "Waiver Signed":
+                    var.set(entry_var.get())  # "Yes" or "No"
+                else:
+                    var.set(entry_var.get())
             save_callback()
             popup.destroy()
 
-        # ----- Center popup on screen -----
-        popup.update_idletasks()  # calculate natural size
-        width = popup.winfo_width()
-        height = popup.winfo_height()
-        center_window(popup, width, height)
+        popup.update_idletasks()
+        center_window(popup, popup.winfo_width(), popup.winfo_height())
 
-
+    # ----- Save functions -----
     def _save_basic(self):
         database.update_member_basic(self.member_id,
                                      self.first_name_var.get(),
@@ -1344,6 +1367,7 @@ class MemberForm(tk.Frame):
                                        self.email_var.get(),
                                        self.email2_var.get(),
                                        self.phone_var.get(),
+                                       self.phone2_var.get(),
                                        self.address_var.get(),
                                        self.city_var.get(),
                                        self.state_var.get(),
@@ -1353,16 +1377,22 @@ class MemberForm(tk.Frame):
             self.on_save_callback(self.member_id)
 
     def _save_membership(self):
-        database.update_member_membership(self.member_id,
-                                          self.badge_number_var.get(),
-                                          self.membership_type_var.get(),
-                                          self.join_date_var.get(),
-                                          self.sponsor_var.get(),
-                                          self.card_internal_var.get(),
-                                          self.card_external_var.get())
+        waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes", "No") else "No"
+        database.update_member_membership(
+            member_id=self.member_id,
+            badge_number=self.badge_number_var.get(),
+            membership_type=self.membership_type_var.get(),
+            join_date=self.join_date_var.get(),
+            sponsor=self.sponsor_var.get(),
+            card_internal=self.card_internal_var.get(),
+            card_external=self.card_external_var.get(),
+            phone2=self.phone2_var.get(),
+            waiver=waiver_str
+        )
         self._load_member_data()
         if self.on_save_callback:
             self.on_save_callback(self.member_id)
+
 
 
 # ----------------------- Specialized Tabs -----------------------
@@ -1440,6 +1470,7 @@ class DuesTab(DataTab):
         if not selected:
             messagebox.showinfo("Info", "Select a record to edit")
             return
+        
         row_id = int(selected[0])
         current_values = list(self.tree.item(selected[0], "values"))
         self._open_edit_popup("Edit Dues", ["Date", "Year", "Amount", "Method", "Notes"],
@@ -1450,6 +1481,7 @@ class DuesTab(DataTab):
         if not selected:
             messagebox.showinfo("Info", "Select a record to delete")
             return
+        
         row_id = int(selected[0])
         if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this record?"):
             database.delete_dues_payment(row_id)
@@ -1465,43 +1497,50 @@ class DuesTab(DataTab):
         current_values = list(self.tree.item(selected[0], "values"))
         self._open_edit_popup("Edit Dues", ["Date", "Year", "Amount", "Method", "Notes"],
                               lambda *vals: self._update_dues(row_id, *vals), current_values)
+
     def _open_edit_popup(self, title, labels, save_func, default_values):
-        # Create the popup window
         popup = tk.Toplevel(self.parent)
         popup.title(title)
 
-        # Create form entries
-        form_entries = []
-        row = 0
-        for label, default_value in zip(labels, default_values):
-            ttk.Label(popup, text=label).grid(row=row, column=0, padx=5, pady=5, sticky="w")
-            
+        # Fonts
+        popup_font = tkFont.Font(family="Helvetica", size=12, weight="bold")
+        entry_font = tkFont.Font(family="Helvetica", size=12)
+        input_width = 20  # uniform width for entries/combobox
+
+        entry_vars = {}
+
+        for idx, (label, default_value) in enumerate(zip(labels, default_values)):
+            frame = tk.Frame(popup)
+            lbl = tk.Label(frame, text=label, font=popup_font)
+            lbl.pack(side=tk.LEFT)
+
+            var = tk.StringVar(value=default_value)
+            entry_vars[label] = var
+
             if label == "Method":
-                # Create a combobox for "Method"
-                entry_var = tk.StringVar(value=default_value)
-                combobox = ttk.Combobox(popup, textvariable=entry_var, values=METHOD_OPTIONS)
-                combobox.grid(row=row, column=1, padx=5, pady=5)
-                form_entries.append(entry_var)
+                entry = ttk.Combobox(frame, textvariable=var, values=METHOD_OPTIONS, font=entry_font, width=input_width)
             else:
-                # Create a regular entry for other fields
-                entry_var = tk.StringVar(value=default_value)
-                entry = ttk.Entry(popup, textvariable=entry_var)
-                entry.grid(row=row, column=1, padx=5, pady=5)
-                form_entries.append(entry_var)
-            
-            row += 1
+                entry = tk.Entry(frame, textvariable=var, font=entry_font, width=input_width)
+            entry.pack(side=tk.RIGHT)
+            frame.pack(fill="x", padx=10, pady=5)
 
-        # Save button to save the data
         def save():
-            entries = [entry.get() for entry in form_entries]
-            save_func(*entries)  # Call the provided save function with the entries
-            popup.destroy()
+            values = [entry_vars[label].get() for label in labels]
+            save_func(*values)
+            popup.destroy()  # only closes the popup
 
-        ttk.Button(popup, text="Save", command=save).grid(row=row, column=0, columnspan=2, pady=5)
+        save_button = tk.Button(popup, text="Save", command=save, font=popup_font)
+        save_button.pack(pady=10)
+
+        # Center and size the popup
+        popup.update_idletasks()
+        center_window(popup, width=350, height=250)
 
         # Make the popup modal
         popup.grab_set()
-        popup.mainloop()
+        # <-- IMPORTANT: remove popup.mainloop() here!
+
+
 
 
 class WorkHoursTab(DataTab):
@@ -1574,6 +1613,7 @@ class WorkHoursTab(DataTab):
         if not selected:
             messagebox.showinfo("Info", "Select a record to edit")
             return
+            
         
         row_id = int(selected[0])
         current_values = list(self.tree.item(selected[0], "values"))
@@ -1614,44 +1654,51 @@ class WorkHoursTab(DataTab):
         popup = tk.Toplevel(self.parent)
         popup.title(title)
 
+        # Define fonts
+        popup_font = tkFont.Font(family="Helvetica", size=12, weight="bold")
+        entry_font = tkFont.Font(family="Helvetica", size=12)
+        input_width = 23  # uniform width for all fields
+
         entry_vars = {}
         entries = []
 
-        # Correct label order: Date, Activity, Hours, Notes
+        # Correct label order
         correct_labels = ["Date", "Activity", "Hours", "Notes"]
 
-        # Create label and entry widgets for each field
-        for idx, label in enumerate(correct_labels):  # Use correct_labels order
+        for idx, label in enumerate(correct_labels):
             frame = tk.Frame(popup)
-            tk.Label(frame, text=label).pack(side=tk.LEFT)
+
+            # Bold label
+            lbl = tk.Label(frame, text=label, font=popup_font)
+            lbl.pack(side=tk.LEFT)
 
             var = tk.StringVar()
-            # Set default value if any
             if default_values and idx < len(default_values):
                 var.set(default_values[idx])
 
-            # Create entry field for each label
-            entry = tk.Entry(frame, textvariable=var)
+            # Entry field
+            entry = tk.Entry(frame, textvariable=var, font=entry_font, width=input_width)
             entry.pack(side=tk.RIGHT)
+
             entry_vars[label] = var
             entries.append(entry)
             frame.pack(fill="x", padx=10, pady=5)
 
         def save_record():
-            # Get the values from the form
             date = entry_vars["Date"].get()
-            hours = entry_vars["Hours"].get()
             activity = entry_vars["Activity"].get()
+            hours = entry_vars["Hours"].get()
             notes = entry_vars["Notes"].get()
-
-            # Call the save_function, e.g., _add_work or another
             save_function(date, hours, activity, notes)
             popup.destroy()
 
-        save_button = tk.Button(popup, text="Save", command=save_record)
+        save_button = tk.Button(popup, text="Save", command=save_record, font=popup_font)
         save_button.pack(pady=10)
 
-        popup.mainloop()
+        # Center and size popup
+        popup.update_idletasks()
+        center_window(popup, width=300, height=200)
+
 
 
 class AttendanceTab(DataTab):
@@ -1737,25 +1784,35 @@ class AttendanceTab(DataTab):
         self._open_edit_popup("Add Attendance", ["Date", "Status", "Notes"],
                               self._add_attendance, [today_str, STATUS_OPTIONS[0], ""])
 
+
+
     def _open_edit_popup(self, title, labels, save_function, default_values):
         popup = tk.Toplevel(self.parent)
         popup.title(title)
 
+        # Define a bigger, bold font
+        popup_font = tkFont.Font(family="Helvetica", size=12, weight="bold")
+        entry_font = tkFont.Font(family="Helvetica", size=12)
+        
+        input_width = 20
+        
         entry_vars = {}
         entries = []
 
         for idx, label in enumerate(labels):
             frame = tk.Frame(popup)
-            tk.Label(frame, text=label).pack(side=tk.LEFT)
+            
+            lbl = tk.Label(frame, text=label, font=popup_font)
+            lbl.pack(side=tk.LEFT)
 
             var = tk.StringVar()
             if default_values and idx < len(default_values):
                 var.set(default_values[idx])
 
             if label == "Status":
-                entry = ttk.Combobox(frame, textvariable=var, values=STATUS_OPTIONS)
+                entry = ttk.Combobox(frame, textvariable=var, values=STATUS_OPTIONS, font=entry_font, width=input_width)
             else:
-                entry = tk.Entry(frame, textvariable=var)
+                entry = tk.Entry(frame, textvariable=var, font=entry_font, width=22)
 
             entry.pack(side=tk.RIGHT)
             entry_vars[label] = var
@@ -1769,10 +1826,14 @@ class AttendanceTab(DataTab):
             save_function(date, status, notes)
             popup.destroy()
 
-        save_button = tk.Button(popup, text="Save", command=save_record)
+        save_button = tk.Button(popup, text="Save", command=save_record, font=popup_font)
         save_button.pack(pady=10)
 
-        popup.mainloop()
+        # Center the popup and optionally set a reasonable default size
+        popup.update_idletasks()
+        center_window(popup, width=300, height=200)  # Adjust size for larger font
+
+        
 
     def delete_selected(self):
         selected = self.tree.selection()
@@ -1793,7 +1854,7 @@ class ReportsWindow(tk.Toplevel):
         super().__init__(parent)
         self.title("Reports")
         self.geometry("900x600")
-        from gui import center_window
+        
         center_window(self, 900, 600, parent)
 
                 # Keep it on top of the main window
@@ -1818,6 +1879,12 @@ class ReportsWindow(tk.Toplevel):
         attendance_tab = ttk.Frame(notebook)
         notebook.add(attendance_tab, text="Attendance")
         AttendanceReport(attendance_tab, member_id).pack(fill="both", expand=True)
+
+        # ---------------- Waiver Tab ---------------- #
+# ---------------- Waiver Tab ---------------- #
+        waiver_tab_frame = ttk.Frame(notebook)
+        notebook.add(waiver_tab_frame, text="Waivers")
+        WaiverReport(waiver_tab_frame, member_id).pack(fill="both", expand=True)
 
 
 # ---------------- Base Report ---------------- #
@@ -2226,6 +2293,24 @@ class AttendanceReport(BaseReport):
                         self.tree.insert("", "end", values=(badge, name, status))
         except Exception as e:
             messagebox.showerror("Attendance Report", f"Failed to fetch attendance data:\n{e}")
+
+
+# ---------------- Waiver Report ---------------- #
+class WaiverReport(BaseReport):
+    columns = ["badge", "name", "waiver"]
+    column_widths = [80, 200, 100]
+
+    def __init__(self, parent, member_id=None):
+        super().__init__(parent, member_id, include_month=False)
+        self.populate_report()
+
+    def populate_report(self):
+        self.tree.delete(*self.tree.get_children())
+        rows = database.get_waiver_report()
+        for m in rows:
+            self.tree.insert("", "end", values=(m["badge_number"], m["name"], m["waiver"]))
+
+
 
 if __name__ == "__main__":
     root = tk.Tk()
