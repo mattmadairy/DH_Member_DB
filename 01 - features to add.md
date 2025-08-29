@@ -1,21 +1,19 @@
-
 main gui print formatting: format gui tab print screen - solve wrapping issue & double spacing. 
 
-full member report - save as pdf functionality. button currently creates a txt file & opens the notepad 
-    #from reportlab.lib.pagesizes import letter
-    #from reportlab.pdfgen import canvas
+full member report - format bottom section with seperators and spaces. add back print function
     
+waivers - need to figure out whether or not to use year. need to evaluate how long the waiver is good for
 
-background images
-icon images
-waivers - report works, need to figure out whether or not to use year.
 
 roles
 committees
 
+import csv for meeting attendance captured from the card reader system. 
 
-future integration with data captured from the card reader system. 
 
+
+background images
+icon images
 log in/user accounts 
 logging actions 
 web app 

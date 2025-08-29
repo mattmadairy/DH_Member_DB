@@ -6,6 +6,9 @@ import database
 from datetime import datetime
 import csv
 import calendar
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+
 
 DATE_FMT = "%m/%d/%Y"
 STATUS_OPTIONS = ["Attended", "Exemption Approved"]
@@ -300,40 +303,37 @@ class MemberApp:
     
 
     def _full_member_report(self, member_id, year=None):
-
         # Ask for year if not provided
         if year is None:
-                # Generate a list of years (e.g., last 30 years up to current)
-                current_year = datetime.now().year
-                years = [str(y) for y in range(current_year, current_year - 30, -1)]
+            current_year = datetime.now().year
+            years = [str(y) for y in range(current_year, current_year - 30, -1)]
 
-                year_popup = tk.Toplevel(self.root)
-                year_popup.title("Select Year")
-                center_window(year_popup, 250, 100, self.root)
+            year_popup = tk.Toplevel(self.root)
+            year_popup.title("Select Year")
+            center_window(year_popup, 250, 120, self.root)
 
-                tk.Label(year_popup, text="Select Year for Report:").pack(pady=(10,5))
-                year_var = tk.StringVar(value=str(current_year))
-                year_combobox = ttk.Combobox(year_popup, values=years, textvariable=year_var, state="readonly", width=10)
-                year_combobox.pack(pady=5)
-                year_combobox.focus_set()
+            tk.Label(year_popup, text="Select Year for Report:").pack(pady=(10,5))
+            year_var = tk.StringVar(value=str(current_year))
+            year_combobox = ttk.Combobox(year_popup, values=years, textvariable=year_var, state="readonly", width=10)
+            year_combobox.pack(pady=5)
+            year_combobox.focus_set()
 
-                selected_year = []
+            selected_year = []
 
-                def confirm_year():
-                    val = year_var.get()
-                    if val.isdigit():
-                        selected_year.append(int(val))
-                        year_popup.destroy()
-                    else:
-                        messagebox.showwarning("Invalid Year", "Please select a valid year.")
+            def confirm_year():
+                val = year_var.get()
+                if val.isdigit():
+                    selected_year.append(int(val))
+                    year_popup.destroy()
+                else:
+                    messagebox.showwarning("Invalid Year", "Please select a valid year.")
 
-                ttk.Button(year_popup, text="OK", command=confirm_year).pack(pady=(5,10))
+            ttk.Button(year_popup, text="OK", command=confirm_year).pack(pady=(5,10))
+            self.root.wait_window(year_popup)
 
-                self.root.wait_window(year_popup)
-
-                if not selected_year:
-                    return
-                year = selected_year[0]
+            if not selected_year:
+                return
+            year = selected_year[0]
 
         # Fetch member info
         member = database.get_member_by_id(member_id)
@@ -344,25 +344,49 @@ class MemberApp:
         # Report header
         org_name = "Dug Hill Rod & Gun Club"
         report_name = f"Full Member Report for {member[3]} {member[4]} ({year})"
-        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-        report_text = f"{org_name.center(80)}\n{report_name.center(80)}\nGenerated: {generation_dt}\n{'='*80}\n\n"
+        generation_dt = "Generated: " + datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+        report_text = f"{org_name.center(80)}\n{report_name.center(80)}\n{generation_dt.center(80)}\n{'='*80}\n\n"
 
-        # Personal & contact info
-        sections = [
-            ("Personal", [("First Name", member[3]), ("Last Name", member[4]), ("DOB", member[5])]),
-            ("Contact", [("Email", member[6]), ("Email 2", member[13]), ("Phone", member[7])]),
-            ("Access", [("Card Internal #", member[15]), ("Card External #", member[16])]),
-            ("Membership", [("Badge", member[1]), ("Type", member[2]), ("Join Date", member[12]), ("Sponsor", member[14])]),
-            ("Address", [("Address", member[8]), ("City", member[9]), ("State", member[10]), ("Zip", member[11])])
-        ]
-        for section, fields in sections:
-            report_text += f"  {section}\n"
-            for name, value in fields:
-                report_text += f"    {name}: {value}\n"
-            report_text += "\n"
 
-        # ---- Dues ----
-        report_text += "="*80 + "\n  Dues History\n"
+        # ---------- Top Blocks with Indented Lines ----------
+        indent = "    "  # 4 spaces for indent
+        left_width = 38
+        right_width = 38
+
+        # Row 1: Personal | Membership
+        left_fields = [("First Name", member[3]), ("Last Name ", member[4]), ("DOB       ", member[5])]
+        right_fields = [("Badge    ", member[1]), ("Type     ", member[2]), ("Join Date", member[12]),
+                        ("Sponsor  ", member[14]), ("Waiver   ", member[19])]
+        report_text += "Personal".ljust(left_width) + "Membership\n"
+        max_lines = max(len(left_fields), len(right_fields))
+        for i in range(max_lines):
+            left_text = f"{indent}{left_fields[i][0]}: {left_fields[i][1]}" if i < len(left_fields) else ""
+            right_text = f"{indent}{right_fields[i][0]}: {right_fields[i][1]}" if i < len(right_fields) else ""
+            report_text += f"{left_text.ljust(left_width)}{right_text.ljust(right_width)}\n"
+        report_text += "\n"
+
+        # Row 2: Contact | Access
+        left_fields = [("Email  ", member[6]), ("Email 2", member[13]), ("Phone  ", member[7]), ("Phone 2", member[18])]
+        right_fields = [("Card Internal #", member[15]), ("Card External #", member[16])]
+        report_text += "Contact".ljust(left_width) + "Access\n"
+        max_lines = max(len(left_fields), len(right_fields))
+        for i in range(max_lines):
+            left_text = f"{indent}{left_fields[i][0]}: {left_fields[i][1]}" if i < len(left_fields) else ""
+            right_text = f"{indent}{right_fields[i][0]}: {right_fields[i][1]}" if i < len(right_fields) else ""
+            report_text += f"{left_text.ljust(left_width)}{right_text.ljust(right_width)}\n"
+        report_text += "\n"
+
+        # Row 3: Address | (blank)
+        left_fields = [("Address", member[8]), ("City   ", member[9]), ("State  ", member[10]), ("Zip    ", member[11])]
+        right_fields = []
+        report_text += "Address\n"
+        for i in range(len(left_fields)):
+            left_text = f"{indent}{left_fields[i][0]}: {left_fields[i][1]}"
+            report_text += f"{left_text.ljust(left_width)}\n"
+        report_text += "\n" + "="*80 + "\n"
+
+        # ---------- Dues ----------
+        report_text += "  Dues History\n"
         dues = database.get_dues_by_member(member_id, year=year)
         if dues:
             report_text += f"{'Payment Date':12}{'Year':6}{'Amount':8}{'Method':10}{'Notes':40}\n"
@@ -376,9 +400,10 @@ class MemberApp:
             report_text += "-"*80 + f"\nTotal Dues: ${total_dues:.2f}\n"
         else:
             report_text += "No dues recorded\n"
+        report_text += "\n"
 
-        # ---- Work Hours ----
-        report_text += "="*80 + "\n  Work Hours\n"
+        # ---------- Work Hours ----------
+        report_text += "  Work Hours\n"
         work_hours = database.get_work_hours_by_member(member_id, year=year)
         if work_hours:
             report_text += f"{'Date':12}{'Hours':6}{'Activity':20}{'Notes':40}\n"
@@ -392,9 +417,10 @@ class MemberApp:
             report_text += "-"*80 + f"\nTotal Work Hours: {total_hours}\n"
         else:
             report_text += "No work hours recorded\n"
+        report_text += "\n"
 
-        # ---- Attendance ----
-        report_text += "="*80 + "\n  Meeting Attendance\n"
+        # ---------- Attendance ----------
+        report_text += "  Meeting Attendance\n"
         attendance = database.get_meeting_attendance(member_id, year=year)
         if attendance:
             report_text += f"{'Date':12}{'Status':20}{'Notes':40}\n"
@@ -408,35 +434,51 @@ class MemberApp:
         else:
             report_text += "No attendance recorded\n"
 
-        # ---- Display in preview window ----
+        # ---------- Display in Preview ----------
         preview = tk.Toplevel(self.root)
         preview.title(f"Full Member Report - {member[3]} {member[4]} ({year})")
-        center_window(preview, 800, 600, parent=self.root)  # <-- Center report window
-        text_frame = ttk.Frame(preview)
-        text_frame.pack(fill="both", expand=True)
-        text_widget = tk.Text(text_frame, wrap="none", font=("Courier New", 10))
+        center_window(preview, 800, 600, parent=self.root)
+
+        text_widget = tk.Text(preview, wrap="none", font=("Courier New", 10))
         text_widget.insert("1.0", report_text)
         text_widget.configure(state="disabled")
-        text_widget.pack(fill="both", expand=True, side="left")
-        yscroll = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        text_widget.pack(fill="both", expand=True, side="top")
+
+        # Scrollbars
+        yscroll = ttk.Scrollbar(preview, orient="vertical", command=text_widget.yview)
         yscroll.pack(side="right", fill="y")
         text_widget.configure(yscrollcommand=yscroll.set)
         xscroll = ttk.Scrollbar(preview, orient="horizontal", command=text_widget.xview)
         xscroll.pack(side="bottom", fill="x")
         text_widget.configure(xscrollcommand=xscroll.set)
 
-        # ---- Buttons ----
+        # ---------- Buttons at Bottom ----------
         btn_frame = ttk.Frame(preview)
         btn_frame.pack(fill="x", pady=5)
-        def save_report_txt():
+        
+        def save_report_pdf():
             path = filedialog.asksaveasfilename(
-                initialfile=f"MemberReport_{member[3]}_{member[4]}_{year}.txt",
-                defaultextension=".txt",
-                filetypes=[("Text Files", "*.txt")]
+                initialfile=f"MemberReport_{member[3]}_{member[4]}_{year}.pdf",
+                defaultextension=".pdf",
+                filetypes=[("PDF Files", "*.pdf")]
             )
             if path:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(report_text)
+                try:
+                    c = canvas.Canvas(path, pagesize=letter)
+                    width, height = letter
+                    c.setFont("Courier", 10)
+                    y = height - 50
+                    for line in report_text.splitlines():
+                        c.drawString(50, y, line)
+                        y -= 12
+                        if y < 50:
+                            c.showPage()
+                            c.setFont("Courier", 10)
+                            y = height - 50
+                    c.save()
+                except Exception as e:
+                    messagebox.showerror("PDF Error", f"Failed to save PDF: {e}")
+
         def save_report_csv():
             path = filedialog.asksaveasfilename(
                 initialfile=f"MemberReport_{member[3]}_{member[4]}_{year}.csv",
@@ -446,12 +488,12 @@ class MemberApp:
             if path:
                 with open(path, "w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
-                    # Write member info
-                    for section, fields in sections:
+                    # Write top blocks
+                    for section, fields in [("Personal", left_fields), ("Membership", right_fields)]:
                         for field, value in fields:
                             writer.writerow([section, field, value])
                     writer.writerow([])
-                    # Write dues
+                    # Dues
                     writer.writerow(["Dues History"])
                     if dues:
                         writer.writerow(["Payment Date", "Year", "Amount", "Method", "Notes"])
@@ -477,11 +519,13 @@ class MemberApp:
                             writer.writerow([a[2], a[3], a[4]])
                     else:
                         writer.writerow(["No attendance recorded"])
-        ttk.Button(btn_frame, text="Save as TXT", command=save_report_txt).pack(side="left", padx=10)
+
+        ttk.Button(btn_frame, text="Save as PDF", command=save_report_pdf).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Save as CSV", command=save_report_csv).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=10)
 
-            
+
+                
     # ---------- Load Members ----------
     def load_data(self):
         for tree in self.trees.values():
@@ -843,7 +887,6 @@ class NewMemberForm:
             messagebox.showerror("Error", f"Failed to add member: {e}")
 
 
-
 class RecycleBinWindow:
     def __init__(self, parent, refresh_main_fn=None):
         self.parent = parent
@@ -1092,7 +1135,6 @@ class DataTab:
         ttk.Button(popup, text="Cancel", command=popup.destroy).grid(row=len(self.entry_fields), column=1, pady=8)
 
 
-# ----------------------- Member Form -----------------------
 class MemberForm(tk.Frame):
     def __init__(self, parent, member_id=None, on_save_callback=None, select_tab=None):
         self.top = tk.Toplevel(parent)
@@ -1394,8 +1436,6 @@ class MemberForm(tk.Frame):
             self.on_save_callback(self.member_id)
 
 
-
-# ----------------------- Specialized Tabs -----------------------
 class DuesTab(DataTab):
     def __init__(self, parent, member_id):
         super().__init__(
@@ -1539,8 +1579,6 @@ class DuesTab(DataTab):
         # Make the popup modal
         popup.grab_set()
         # <-- IMPORTANT: remove popup.mainloop() here!
-
-
 
 
 class WorkHoursTab(DataTab):
@@ -1700,7 +1738,6 @@ class WorkHoursTab(DataTab):
         center_window(popup, width=300, height=200)
 
 
-
 class AttendanceTab(DataTab):
     def __init__(self, parent, member_id):
         # Initialize the DataTab with correct parameters for the AttendanceTab
@@ -1846,9 +1883,6 @@ class AttendanceTab(DataTab):
             self.load_records(self.member_id)
 
 
-
-
-
 class ReportsWindow(tk.Toplevel):
     def __init__(self, parent, member_id=None):
         super().__init__(parent)
@@ -1887,7 +1921,6 @@ class ReportsWindow(tk.Toplevel):
         WaiverReport(waiver_tab_frame, member_id).pack(fill="both", expand=True)
 
 
-# ---------------- Base Report ---------------- #
 class BaseReport(tk.Frame):
     """Base class with common controls for member/year/month filters and CSV export"""
     def __init__(self, parent, member_id=None, include_month=True):
@@ -2144,7 +2177,6 @@ class BaseReport(tk.Frame):
             MemberForm(self, member_id=member_id, select_tab=selected_tab)
 
 
-# ---------------- Dues Report ---------------- #
 class DuesReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "membership_type", "amount_due", "balance_due",
@@ -2220,7 +2252,7 @@ class DuesReport(BaseReport):
         except Exception as e:
             messagebox.showerror("Dues Report", f"Failed to fetch dues data:\n{e}")
 
-# ---------------- Work Hours Report ---------------- #
+
 class Work_HoursReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "work_hours")
@@ -2252,7 +2284,7 @@ class Work_HoursReport(BaseReport):
         except Exception as e:
             messagebox.showerror("Work Hours Report", f"Failed to fetch work hours data:\n{e}")
 
-# ---------------- Attendance Report ---------------- #
+
 class AttendanceReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "status")
@@ -2295,7 +2327,6 @@ class AttendanceReport(BaseReport):
             messagebox.showerror("Attendance Report", f"Failed to fetch attendance data:\n{e}")
 
 
-# ---------------- Waiver Report ---------------- #
 class WaiverReport(BaseReport):
     columns = ["badge", "name", "waiver"]
     column_widths = [80, 200, 100]
@@ -2309,7 +2340,6 @@ class WaiverReport(BaseReport):
         rows = database.get_waiver_report()
         for m in rows:
             self.tree.insert("", "end", values=(m["badge_number"], m["name"], m["waiver"]))
-
 
 
 if __name__ == "__main__":
