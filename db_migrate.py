@@ -1,25 +1,24 @@
 import sqlite3
 
-# Path to your database file
-DB_FILE = "members.db"
+# Connect to your database (or create it if it doesn't exist)
+conn = sqlite3.connect("members.db")
+cursor = conn.cursor()
 
-def drop_tables():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+# ---------- Roles Table ----------
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    position TEXT NOT NULL,        -- president, vice-president, treasurer, secretary, trustee
+    term_start DATE,               -- start date of term
+    term_end DATE,                 -- end date of term
+    FOREIGN KEY(member_id) REFERENCES members(id)
+)
+""")
 
-    try:
-        # Drop the tables if they exist
-        cursor.execute("DROP TABLE IF EXISTS work_hours_old;")
-        cursor.execute("DROP TABLE IF EXISTS expected_dues;")
 
-        conn.commit()
-        print("Tables 'work_hours_old' and 'expected_dues' dropped (if they existed).")
+# Commit and close
+conn.commit()
+conn.close()
 
-    except sqlite3.Error as e:
-        print("An error occurred:", e)
-
-    finally:
-        conn.close()
-
-if __name__ == "__main__":
-    drop_tables()
+print("Tables 'roles' created successfully.")

@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
 import tkinter.font as tkFont
-import os
+import os, tempfile, platform, subprocess
 import database
 from datetime import datetime
 import csv
@@ -86,7 +86,7 @@ class MemberApp:
         file_menu.add_command(label="⬆️ Import ", command=self._show_import_dialog)
         file_menu.add_command(label="⬇️ Export Current Tab", command=self._show_export_dialog)
         file_menu.add_separator()
-        file_menu.add_command(label="🖨  Print Current Tab", command=self._print_members)
+        file_menu.add_command(label="🖨  Print/Save Current Tab", command=self._print_members)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
 
@@ -344,8 +344,7 @@ class MemberApp:
         # Report header
         org_name = "Dug Hill Rod & Gun Club"
         report_name = f"Full Member Report for {member[3]} {member[4]} ({year})"
-        generation_dt = "Generated: " + datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-        report_text = f"{org_name.center(80)}\n{report_name.center(80)}\n{generation_dt.center(80)}\n{'='*80}\n\n"
+        report_text = f"{org_name.center(80)}\n{report_name.center(80)}\n{'='*80}\n\n"
 
 
         # ---------- Top Blocks with Indented Lines ----------
@@ -386,10 +385,10 @@ class MemberApp:
         report_text += "\n" + "="*80 + "\n"
 
         # ---------- Dues ----------
-        report_text += "  Dues History\n"
+        report_text += "\n" + "  Dues History\n"
         dues = database.get_dues_by_member(member_id, year=year)
         if dues:
-            report_text += f"{'Payment Date':12}{'Year':6}{'Amount':8}{'Method':10}{'Notes':40}\n"
+            report_text += f"{'Date':12}{'Year':6}{'Amount':8}{'Method':10}{'Notes':40}\n"
             report_text += "-"*80 + "\n"
             total_dues = 0.0
             for d in dues:
@@ -397,7 +396,8 @@ class MemberApp:
                 amt = float(d[4] or 0.0)
                 total_dues += amt
                 report_text += f"{payment_date:12}{d[3]:6}{amt:<8.2f}{(d[5] or ''):10}{(d[6] or ''):40}\n"
-            report_text += "-"*80 + f"\nTotal Dues: ${total_dues:.2f}\n"
+            report_text += "-"*80 + f"\nTotal Dues: ${total_dues:.2f}\n" + "="* 80 + "\n"
+
         else:
             report_text += "No dues recorded\n"
         report_text += "\n"
@@ -414,7 +414,7 @@ class MemberApp:
                 hours = float(w[4] or 0.0)
                 total_hours += hours
                 report_text += f"{date:12}{hours:<6}{(w[3] or ''):20}{(w[5] or ''):40}\n"
-            report_text += "-"*80 + f"\nTotal Work Hours: {total_hours}\n"
+            report_text += "-"*80 + f"\nTotal Work Hours: {total_hours}\n" + "="* 80 + "\n"
         else:
             report_text += "No work hours recorded\n"
         report_text += "\n"
@@ -430,9 +430,14 @@ class MemberApp:
                 date = a[2] or "N/A"
                 report_text += f"{date:12}{(a[3] or ''):20}{(a[4] or ''):40}\n"
                 total_meetings += 1
-            report_text += "-"*80 + f"\nTotal Meetings Attended: {total_meetings}\n"
+            report_text += "-"*80 + f"\nTotal Meetings Attended: {total_meetings}\n" + "="* 80 + "\n"
         else:
             report_text += "No attendance recorded\n"
+
+        # ---------- End of Report ----------
+        generation_dt = "Generated: " + datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+        footer = ("--End of Report--".center(80) )
+        report_text += "\n"+ footer+"\n" + generation_dt.center(80) 
 
         # ---------- Display in Preview ----------
         preview = tk.Toplevel(self.root)
@@ -520,6 +525,34 @@ class MemberApp:
                     else:
                         writer.writerow(["No attendance recorded"])
 
+        def print_report():
+            try:
+                # Save PDF to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    path = tmp.name
+
+                c = canvas.Canvas(path, pagesize=letter)
+                width, height = letter
+                c.setFont("Courier", 10)
+                y = height - 50
+                for line in report_text.splitlines():
+                    c.drawString(50, y, line)
+                    y -= 12
+                    if y < 50:
+                        c.showPage()
+                        c.setFont("Courier", 10)
+                        y = height - 50
+                c.save()
+
+                # Open the PDF in the system default viewer
+                os.startfile(path)
+
+            except Exception as e:
+                messagebox.showerror("Print Error", f"Failed to open PDF: {e}")
+
+
+
+        ttk.Button(btn_frame, text="Print", command=print_report).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Save as PDF", command=save_report_pdf).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Save as CSV", command=save_report_csv).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=10)
@@ -553,7 +586,6 @@ class MemberApp:
         form = self._open_member_form(member_id)
         self.root.wait_window(form.top)
 
-    # ---------- Print Current Tab ----------
     def _print_members(self):
         current_tab = self.notebook.tab(self.notebook.select(), "text")
         tree = self.trees[current_tab]
@@ -563,38 +595,32 @@ class MemberApp:
             return
 
         org_name = "Dug Hill Rod & Gun Club"
-        report_name = f"Member List - {current_tab}"
+        report_name = f"Member List - {current_tab}\n"
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
         generated_text = f"Generated: {generation_dt}"
 
-        # --- remove Email2 / Email Address 2 ---
+        # remove Email2 / Email Address 2
         print_columns = [c for c in self.TREE_COLUMNS if c.lower() not in ("email2", "email address 2")]
-
         headers = [tree.heading(c)["text"] for c in print_columns]
-        max_total_width = 100
-        col_widths = [len(h) for h in headers]
 
-        # adjust widths
+        col_widths = [len(h) for h in headers]
         for idx, col in enumerate(print_columns):
             for item in items:
                 value = str(tree.item(item, "values")[self.TREE_COLUMNS.index(col)])
                 if len(value) > col_widths[idx]:
                     col_widths[idx] = len(value)
 
-        total_width = sum(col_widths) + 2 * len(col_widths)
-        if total_width > max_total_width:
-            scale = (max_total_width - 2 * len(col_widths)) / sum(col_widths)
-            col_widths = [max(4, int(w * scale)) for w in col_widths]
-
-        # rows
+        # build rows with proper justification
         rows = []
         for item in items:
-            row = []
             values = tree.item(item, "values")
+            row = []
             for idx, col in enumerate(print_columns):
                 value = str(values[self.TREE_COLUMNS.index(col)])
                 if col == "Badge":
-                    row.append(value.center(col_widths[idx]))
+                    row.append(value.ljust(col_widths[idx]))
+                elif "phone" in col.lower():
+                    row.append(value.rjust(col_widths[idx]))
                 else:
                     row.append(value.ljust(col_widths[idx]))
             rows.append("  ".join(row))
@@ -604,47 +630,39 @@ class MemberApp:
         total_pages = (len(rows) - 1) // lines_per_page + 1
         pages = [rows[i:i + lines_per_page] for i in range(0, len(rows), lines_per_page)]
 
-        preview_text = ""
         header_line = "  ".join(
             [h.center(col_widths[idx]) if print_columns[idx] == "Badge" else h.ljust(col_widths[idx])
             for idx, h in enumerate(headers)]
         )
         total_members_text = f"Total Members: {len(items)}".center(len(header_line))
 
+        preview_text = ""
         for current_page, page_lines in enumerate(pages, start=1):
             preview_text += f"{org_name.center(len(header_line))}\n"
             preview_text += f"{report_name.center(len(header_line))}\n"
-            preview_text += f"{generated_text.center(len(header_line))}\n\n"
             preview_text += header_line + "\n"
             preview_text += "-" * len(header_line) + "\n"
             preview_text += "\n".join(page_lines) + "\n\n"
+            preview_text += ("=" * len(header_line)) + "\n"
             preview_text += total_members_text + "\n"
+            preview_text += f"{generated_text.center(len(header_line))}\n"
             preview_text += f"Page {current_page} of {total_pages}".center(len(header_line)) + "\n"
-            preview_text += "\n" + ("=" * len(header_line)) + "\n\n"
+            preview_text += ("=" * len(header_line)) + "\n\n"
 
+        # Preview window
         preview = tk.Toplevel(self.root)
         preview.title(f"Print Preview - {current_tab}")
-
-        # --- Dynamically size window based on text ---
         preview.update_idletasks()
 
         text_width = max(len(line) for line in preview_text.splitlines()) if preview_text else 80
-        text_height = min(len(preview_text.splitlines()), 50)  # cap height at 50 lines
-
-        # Courier font is about 8px wide, ~18px tall
-        win_width = min(1200, text_width * 8)
-        win_height = min(900, text_height * 18)
-
-        # Add space for buttons + scrollbars
-        win_height += 100   # room for buttons + horizontal scrollbar
-        win_width += 50     # room for vertical scrollbar
-
-        # Use your existing helper to center the window
+        text_height = min(len(preview_text.splitlines()), 50)
+        win_width = min(1200, text_width * 8) + 50
+        win_height = min(900, text_height * 18) + 100
         center_window(preview, width=win_width, height=win_height, parent=self.root)
 
         text_frame = ttk.Frame(preview)
         text_frame.pack(fill="both", expand=True)
-        text = tk.Text(text_frame, wrap="none")
+        text = tk.Text(text_frame, wrap="none", font=("Courier New", 10))
         text.insert("1.0", preview_text)
         text.configure(state="disabled")
         text.pack(fill="both", expand=True, side="left")
@@ -657,15 +675,86 @@ class MemberApp:
 
         btn_frame = ttk.Frame(preview)
         btn_frame.pack(fill="x", pady=5)
-        
+
+        # PDF export helper
+        def export_to_pdf(filepath):
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            c = canvas.Canvas(filepath, pagesize=letter)
+            width, height = letter
+            c.setFont("Courier", 10)
+            y = height - 50
+            for line in preview_text.splitlines():
+                c.drawString(50, y, line)
+                y -= 12
+                if y < 50:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - 50
+            c.save()
+
+        # Print opens temporary PDF
         def print_text():
-            import tempfile
-            temp_file = tempfile.mktemp(".txt")
-            with open(temp_file, "w") as f:
-                f.write(preview_text)
-            os.startfile(temp_file, "print")
+            import tempfile, os
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    pdf_path = tmp.name
+                export_to_pdf(pdf_path)
+                os.startfile(pdf_path)
+            except Exception as e:
+                messagebox.showerror("Print Error", f"Failed to open PDF: {e}")
+
+        # Save as PDF with auto filename
+        def save_as_pdf():
+            from tkinter import filedialog
+            import os
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"Member_List-{current_tab}-{timestamp}.pdf"
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                initialfile=default_name,
+                filetypes=[("PDF files", "*.pdf")],
+                title="Save Member List as PDF"
+            )
+            if filepath:
+                try:
+                    export_to_pdf(filepath)
+                    os.startfile(filepath)
+                    messagebox.showinfo("Save PDF", f"PDF saved successfully:\n{filepath}")
+                except Exception as e:
+                    messagebox.showerror("Save Error", f"Failed to save PDF: {e}")
+
+        # Save CSV raw
+        def save_as_csv():
+            from tkinter import filedialog
+            import csv
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"Member_List-{current_tab}-{timestamp}.csv"
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                initialfile=default_name,
+                filetypes=[("CSV files", "*.csv")],
+                title="Save Member List as CSV"
+            )
+            if filepath:
+                try:
+                    with open(filepath, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(headers)
+                        for item in items:
+                            values = tree.item(item, "values")
+                            row = [values[self.TREE_COLUMNS.index(col)] for col in print_columns]
+                            writer.writerow(row)
+                    messagebox.showinfo("Save CSV", f"CSV saved successfully:\n{filepath}")
+                except Exception as e:
+                    messagebox.showerror("Save Error", f"Failed to save CSV: {e}")
+
         ttk.Button(btn_frame, text="Print", command=print_text).pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="Save as CSV", command=save_as_csv).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Cancel", command=preview.destroy).pack(side="right", padx=10)
+
+
 
     # ---------- Search ----------
     def _on_search(self, event=None):
@@ -1200,6 +1289,8 @@ class MemberForm(tk.Frame):
         self.card_external_var = tk.StringVar()
         self.waiver_var = tk.StringVar()  # stores "Yes"/"No"
         self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
+        self.role_var = tk.StringVar()
+        self.term_var = tk.StringVar()
 
         self._display_labels = {}
 
@@ -1221,15 +1312,28 @@ class MemberForm(tk.Frame):
             ("Zip Code", self.zip_var)
         ], self._edit_contact, "contact")
 
-        self._build_read_only_tab(self.tab_membership, [
-            ("Badge Number", self.badge_number_var),
-            ("Membership Type", self.membership_type_var),
-            ("Join Date", self.join_date_var),
-            ("Sponsor", self.sponsor_var),
-            ("Card/Fob Internal Number", self.card_internal_var),
-            ("Card/Fob External Number", self.card_external_var),
-            ("Waiver Signed", self.waiver_var)
-        ], self._edit_membership, "membership")
+
+
+        self._build_read_only_tab(
+            self.tab_membership,
+            [
+                ("Badge Number", self.badge_number_var),
+                ("Membership Type", self.membership_type_var),
+                ("Join Date", self.join_date_var),
+                ("Sponsor", self.sponsor_var),
+                ("Card/Fob Internal Number", self.card_internal_var),
+                ("Card/Fob External Number", self.card_external_var),
+                ("Waiver Signed", self.waiver_var)
+            ],
+            self._edit_membership,
+            "membership",
+            right_fields=[
+                ("Role", self.role_var),
+                ("Term", self.term_var)
+            ]
+        )
+
+
 
         # ----- Data tabs -----
         self.dues_tab = DuesTab(self.tab_dues, self.member_id)
@@ -1247,9 +1351,11 @@ class MemberForm(tk.Frame):
         center_window(self.top, width, height)
 
     # ----- Read-only tab builder -----
-    def _build_read_only_tab(self, tab, fields, edit_callback, tab_key):
+    def _build_read_only_tab(self, tab, fields, edit_callback, tab_key, right_fields=None):
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_columnconfigure(1, weight=1)
+        tab.grid_columnconfigure(2, weight=1)
+        tab.grid_columnconfigure(3, weight=1)
 
         self._display_labels[tab_key] = {}
         big_font = font.nametofont("TkDefaultFont").copy()
@@ -1257,14 +1363,40 @@ class MemberForm(tk.Frame):
         label_font = font.nametofont("TkDefaultFont").copy()
         label_font.configure(size=12)
 
-        for idx, (label_text, var) in enumerate(fields):
-            ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=idx, column=0, sticky="e", padx=5, pady=4)
-            display_val = var.get()
-            lbl = ttk.Label(tab, text=display_val, font=label_font)
-            lbl.grid(row=idx, column=1, sticky="w", padx=5, pady=4)
-            self._display_labels[tab_key][label_text] = (lbl, var)
+        max_rows = max(len(fields), len(right_fields) if right_fields else 0)
 
-        ttk.Button(tab, text="Edit", command=edit_callback).grid(row=len(fields), column=0, columnspan=2, pady=12)
+        # Left column
+        for row in range(max_rows):
+            if row < len(fields):
+                label_text, var = fields[row]
+                ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=row, column=0, sticky="w", padx=50, pady=4)
+                lbl = ttk.Label(tab, text=var.get(), font=label_font)
+                lbl.grid(row=row, column=1, sticky="w", padx=0, pady=4)
+                self._display_labels[tab_key][label_text] = (lbl, var)
+            else:
+                # Empty filler for alignment
+                ttk.Label(tab, text="").grid(row=row, column=0)
+                ttk.Label(tab, text="").grid(row=row, column=1)
+
+
+            # Right block
+            if right_fields and row < len(right_fields):
+                label_text, var = right_fields[row]
+                # LEFT justify the right-side labels
+                ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=row, column=2, sticky="w", padx=0, pady=4)
+                lbl = ttk.Label(tab, text=var.get(), font=label_font)
+                lbl.grid(row=row, column=2, sticky="w", padx=75, pady=4)
+                self._display_labels[tab_key][label_text] = (lbl, var)
+
+            elif right_fields:
+                ttk.Label(tab, text="").grid(row=row, column=2)
+                ttk.Label(tab, text="").grid(row=row, column=3)
+
+        ttk.Button(tab, text="Edit", command=edit_callback).grid(
+            row=max_rows,
+            column=0, columnspan=4, pady=12
+        )
+
 
     # ----- Load member data -----
     def _load_member_data(self):
@@ -1309,6 +1441,22 @@ class MemberForm(tk.Frame):
                         var.set(value)
                 else:
                     var.set(value or "")
+
+        # Fetch role info from the roles table
+        role_record = database.get_member_role(self.member_id)
+        if role_record:
+            self.role_var.set(role_record["position"])
+            start = role_record.get("term_start", "")
+            end = role_record.get("term_end", "")
+            if start and end:
+                self.term_var.set(f"{start}  until  {end}")
+            else:
+                self.term_var.set("")
+        else:
+            self.role_var.set("")
+            self.term_var.set("")
+
+
 
         # Update read-only labels
         for tab_labels in self._display_labels.values():

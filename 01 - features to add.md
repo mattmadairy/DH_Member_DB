@@ -1,16 +1,8 @@
-main gui print formatting: format gui tab print screen - solve wrapping issue & double spacing. 
+waivers - need to figure out whether or not to use year. need to evaluate how long the waiver is good for.
 
-full member report - format bottom section with seperators and spaces. add back print function
-    
-waivers - need to figure out whether or not to use year. need to evaluate how long the waiver is good for
-
-
-roles
+roles - need to format the memberform better. add to full member report 
 committees
-
 import csv for meeting attendance captured from the card reader system. 
-
-
 
 background images
 icon images

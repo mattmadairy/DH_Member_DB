@@ -1152,3 +1152,35 @@ def get_waiver_report():
     
     # convert sqlite3.Row objects to dictionaries
     return [dict(row) for row in rows]
+
+
+def get_member_role(member_id):
+    """
+    Returns the role info for a member as a dictionary:
+    {"position": str, "term_start": str, "term_end": str}
+    If no role exists, returns None.
+    """
+    
+
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT position, term_start, term_end
+        FROM roles
+        WHERE member_id = ?
+        LIMIT 1
+    """, (member_id,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return {
+            "position": row["position"],
+            "term_start": row["term_start"],
+            "term_end": row["term_end"]
+        }
+    else:
+        return None
