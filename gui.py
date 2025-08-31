@@ -1448,14 +1448,27 @@ class MemberForm(tk.Frame):
             self.role_var.set(role_record["position"])
             start = role_record.get("term_start", "")
             end = role_record.get("term_end", "")
-            if start and end:
-                self.term_var.set(f"{start}  until  {end}")
+
+            def fmt(date_str):
+                try:
+                    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%m-%d-%Y")
+                except Exception:
+                    return date_str or ""
+
+            start_fmt = fmt(start)
+            end_fmt = fmt(end)
+
+            if start_fmt and end_fmt:
+                self.term_var.set(f"{start_fmt} until {end_fmt}")
+            elif start_fmt:
+                self.term_var.set(f"from {start_fmt}")
+            elif end_fmt:
+                self.term_var.set(f"until {end_fmt}")
             else:
                 self.term_var.set("")
         else:
             self.role_var.set("")
             self.term_var.set("")
-
 
 
         # Update read-only labels
