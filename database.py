@@ -1222,20 +1222,46 @@ def get_member_committees(member_id):
         return {col: "" for col in committee_columns}
 
 
+def update_member_basic(member_id, first_name, last_name, dob):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE members
+        SET first_name = ?, last_name = ?, dob = ?
+        WHERE id = ?
+    """, (first_name, last_name, dob, member_id))
+    conn.commit()
+    conn.close()
+
+
+def update_member_contact(member_id, email, email2, phone, phone2, address, city, state, zip):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE members
+        SET email = ?, email2 = ?, phone = ?, phone2 = ?, address = ?, city = ?, state = ?, zip = ?
+        WHERE id = ?
+    """, (email, email2, phone, phone2, address, city, state, zip, member_id))
+    conn.commit()
+    conn.close()
+
 
 def update_member_committees(member_id, committees_dict):
-    """
-    committees_dict: {'executive_committee': 1, 'membership': 0, ...}
-    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Ensure row exists
+    cursor.execute("SELECT 1 FROM committees WHERE member_id = ?", (member_id,))
+    if cursor.fetchone() is None:
+        # Insert default row
+        cursor.execute("INSERT INTO committees (member_id) VALUES (?)", (member_id,))
+
+    # Update committees
     set_clause = ", ".join([f"{col} = ?" for col in committees_dict.keys()])
     values = list(committees_dict.values())
     values.append(member_id)
-
     query = f"UPDATE committees SET {set_clause} WHERE member_id = ?"
-
-    conn = get_connection()  # Make sure this returns sqlite3.Connection
-    cursor = conn.cursor()
     cursor.execute(query, values)
+
     conn.commit()
     cursor.close()
-

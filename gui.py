@@ -167,7 +167,7 @@ class MemberApp:
             tree.heading(col, text=col, command=lambda c=col, t=tree: self._sort_tree_column(t, c, False))
             tree.column(col, width=120, anchor="w")
             if col == "Badge":
-                tree.column(col, width=80, anchor="center")
+                tree.column(col, width=90, anchor="center")
 
         yscroll = ttk.Scrollbar(container, orient="vertical", command=tree.yview)
         yscroll.grid(row=0, column=1, sticky="ns")
@@ -344,7 +344,7 @@ class MemberApp:
         # Report header
         org_name = "Dug Hill Rod & Gun Club"
         report_name = f"Full Member Report for {member[3]} {member[4]} ({year})"
-        report_text = f"{org_name.center(80)}\n{report_name.center(80)}\n{'='*80}\n\n"
+        report_text = f"{org_name.center(85)}\n{report_name.center(85)}\n{'='*85}\n\n"
 
 
         # ---------- Top Blocks with Indented Lines ----------
@@ -352,10 +352,11 @@ class MemberApp:
         left_width = 38
         right_width = 38
 
+
         # Row 1: Personal | Membership
-        left_fields = [("First Name", member[3]), ("Last Name ", member[4]), ("DOB       ", member[5])]
-        right_fields = [("Badge    ", member[1]), ("Type     ", member[2]), ("Join Date", member[12]),
-                        ("Sponsor  ", member[14]), ("Waiver   ", member[19])]
+        left_fields = [("First Name", member[3]), ("Last Name", member[4]), ("DOB", member[5])]
+        right_fields = [("Badge", member[1]), ("Type", member[2]), ("Join Date", member[12]),
+                        ("Sponsor", member[14]), ("Waiver", member[19])]
         report_text += "Personal".ljust(left_width) + "Membership\n"
         max_lines = max(len(left_fields), len(right_fields))
         for i in range(max_lines):
@@ -365,7 +366,7 @@ class MemberApp:
         report_text += "\n"
 
         # Row 2: Contact | Access
-        left_fields = [("Email  ", member[6]), ("Email 2", member[13]), ("Phone  ", member[7]), ("Phone 2", member[18])]
+        left_fields = [("Email", member[6]), ("Email 2", member[13]), ("Phone", member[7]), ("Phone 2", member[18])]
         right_fields = [("Card Internal #", member[15]), ("Card External #", member[16])]
         report_text += "Contact".ljust(left_width) + "Access\n"
         max_lines = max(len(left_fields), len(right_fields))
@@ -375,28 +376,59 @@ class MemberApp:
             report_text += f"{left_text.ljust(left_width)}{right_text.ljust(right_width)}\n"
         report_text += "\n"
 
-        # Row 3: Address | (blank)
-        left_fields = [("Address", member[8]), ("City   ", member[9]), ("State  ", member[10]), ("Zip    ", member[11])]
-        right_fields = []
-        report_text += "Address\n"
-        for i in range(len(left_fields)):
-            left_text = f"{indent}{left_fields[i][0]}: {left_fields[i][1]}"
-            report_text += f"{left_text.ljust(left_width)}\n"
-        report_text += "\n" + "="*80 + "\n"
+
+        # Row 3: Address | Roles & Committees
+        # Fetch role, term, and committees
+        role_record = database.get_member_role(member_id) or {}
+        role = role_record.get("position", "")
+        term_start = role_record.get("term_start", "")
+        term_end = role_record.get("term_end", "")
+        term_concat = term_start + "  unitl  " + term_end
+
+        # Committees – only include those the member is on
+        committees_record = database.get_member_committees(member_id) or {}
+
+        # Only include committees that are marked as active (non-empty, non-zero)
+        selected_committees = [c for c, val in committees_record.items() if c != "committee_id" and str(val) == "1"]
+        readable_names = [c.replace("_", " ").title() for c in selected_committees]
+
+        # Build right_fields: Role first, then Term, then active committees vertically
+        right_fields = [("Role:", role), ("   Term:", term_concat), ("Committees:", "")]
+        for c in readable_names:
+            right_fields.append(("  ", c, ""))  # Committee name in left column, blank in value
+
+        # Address fields on the left
+        left_fields = [
+            ("Address", member[8]),
+            ("City", member[9]),
+            ("State", member[10]),
+            ("Zip", member[11])
+        ]
+
+        # Print left and right columns side by side
+        report_text += "Address".ljust(left_width) + "Roles & Committees\n"
+        max_lines = max(len(left_fields), len(right_fields))
+        for i in range(max_lines):
+            left_text = f"{indent}{left_fields[i][0]}: {left_fields[i][1]}" if i < len(left_fields) else ""
+            right_text = f"{indent}{right_fields[i][0]} {right_fields[i][1]}" if i < len(right_fields) else ""
+            report_text += f"{left_text.ljust(left_width)}{right_text.ljust(right_width)}\n"
+
+        report_text += "\n" + "="*85 + "\n"
+
 
         # ---------- Dues ----------
         report_text += "\n" + "  Dues History\n"
         dues = database.get_dues_by_member(member_id, year=year)
         if dues:
             report_text += f"{'Date':12}{'Year':6}{'Amount':8}{'Method':10}{'Notes':40}\n"
-            report_text += "-"*80 + "\n"
+            report_text += "-"*85 + "\n"
             total_dues = 0.0
             for d in dues:
                 payment_date = d[2] or "N/A"
                 amt = float(d[4] or 0.0)
                 total_dues += amt
                 report_text += f"{payment_date:12}{d[3]:6}{amt:<8.2f}{(d[5] or ''):10}{(d[6] or ''):40}\n"
-            report_text += "-"*80 + f"\nTotal Dues: ${total_dues:.2f}\n" + "="* 80 + "\n"
+            report_text += "-"*85 + f"\nTotal Dues: ${total_dues:.2f}\n" + "="* 85 + "\n"
 
         else:
             report_text += "No dues recorded\n"
@@ -407,14 +439,14 @@ class MemberApp:
         work_hours = database.get_work_hours_by_member(member_id, year=year)
         if work_hours:
             report_text += f"{'Date':12}{'Hours':6}{'Activity':20}{'Notes':40}\n"
-            report_text += "-"*80 + "\n"
+            report_text += "-"*85 + "\n"
             total_hours = 0.0
             for w in work_hours:
                 date = w[2] or "N/A"
                 hours = float(w[4] or 0.0)
                 total_hours += hours
                 report_text += f"{date:12}{hours:<6}{(w[3] or ''):20}{(w[5] or ''):40}\n"
-            report_text += "-"*80 + f"\nTotal Work Hours: {total_hours}\n" + "="* 80 + "\n"
+            report_text += "-"*85 + f"\nTotal Work Hours: {total_hours}\n" + "="* 85 + "\n"
         else:
             report_text += "No work hours recorded\n"
         report_text += "\n"
@@ -424,25 +456,25 @@ class MemberApp:
         attendance = database.get_meeting_attendance(member_id, year=year)
         if attendance:
             report_text += f"{'Date':12}{'Status':20}{'Notes':40}\n"
-            report_text += "-"*80 + "\n"
+            report_text += "-"*85 + "\n"
             total_meetings = 0
             for a in attendance:
                 date = a[2] or "N/A"
                 report_text += f"{date:12}{(a[3] or ''):20}{(a[4] or ''):40}\n"
                 total_meetings += 1
-            report_text += "-"*80 + f"\nTotal Meetings Attended: {total_meetings}\n" + "="* 80 + "\n"
+            report_text += "-"*85 + f"\nTotal Meetings Attended: {total_meetings}\n" + "="* 85 + "\n"
         else:
             report_text += "No attendance recorded\n"
 
         # ---------- End of Report ----------
         generation_dt = "Generated: " + datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-        footer = ("--End of Report--".center(80) )
-        report_text += "\n"+ footer+"\n" + generation_dt.center(80) 
+        footer = ("--End of Report--".center(85) )
+        report_text += "\n"+ footer+"\n" + generation_dt.center(85) 
 
         # ---------- Display in Preview ----------
         preview = tk.Toplevel(self.root)
         preview.title(f"Full Member Report - {member[3]} {member[4]} ({year})")
-        center_window(preview, 800, 600, parent=self.root)
+        center_window(preview, 850, 600, parent=self.root)
 
         text_widget = tk.Text(preview, wrap="none", font=("Courier New", 10))
         text_widget.insert("1.0", report_text)
@@ -654,7 +686,7 @@ class MemberApp:
         preview.title(f"Print Preview - {current_tab}")
         preview.update_idletasks()
 
-        text_width = max(len(line) for line in preview_text.splitlines()) if preview_text else 80
+        text_width = max(len(line) for line in preview_text.splitlines()) if preview_text else 85
         text_height = min(len(preview_text.splitlines()), 50)
         win_width = min(1200, text_width * 8) + 50
         win_height = min(900, text_height * 18) + 100
@@ -887,17 +919,20 @@ class MemberApp:
 
 class NewMemberForm:
     MEMBERSHIP_TYPES = [
-        "Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"
+        "Probationary", "Associate", "Active", "Life", "Honorary", "Prospective", "Wait List", "Former"
     ]
 
     def __init__(self, parent, on_save_callback=None):
         self.top = tk.Toplevel(parent)
         self.top.title("Add New Member")
-        center_window(self.top, 450, 500, parent)  # Center popup
+        center_window(self.top, 370, 575, parent)  # Center popup
         self.on_save_callback = on_save_callback
 
         self.entries = {}
         self.waiver_var = tk.BooleanVar()
+
+        # Bold font for labels
+        label_font = tkFont.Font(self.top, family="TkDefaultFont", size=12, weight="bold")
 
         # Define fields in logical order: badge -> membership -> names -> contact -> other
         fields = [
@@ -914,7 +949,7 @@ class NewMemberForm:
             "City",
             "State",
             "Zip Code",
-            "Join Date",
+            "Join Date (MM-DD-YYYY)",
             "Sponsor",
             "Card/Fob Internal Number",
             "Card/Fob External Number",
@@ -922,10 +957,12 @@ class NewMemberForm:
         ]
 
         for idx, field in enumerate(fields):
-            tk.Label(self.top, text=field).grid(row=idx, column=0, sticky="e", padx=5, pady=2)
+            tk.Label(self.top, text=field + ":", font=label_font).grid(
+                row=idx, column=0, sticky="e", padx=5, pady=2
+            )
 
             if field == "Membership Type":
-                cb = ttk.Combobox(self.top, values=self.MEMBERSHIP_TYPES, state="readonly")
+                cb = ttk.Combobox(self.top, values=self.MEMBERSHIP_TYPES, state="readonly", width=17)
                 cb.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
                 self.entries[field] = cb
             elif field == "Waiver Signed":
@@ -938,8 +975,11 @@ class NewMemberForm:
 
         # Save button
         tk.Button(self.top, text="Save", command=self._save_member).grid(
-            row=len(fields), column=0, columnspan=2, pady=10
-        )
+            row=len(fields), column=0, columnspan=1, padx=10, pady=10, sticky="w")
+        # Cancel button
+        tk.Button(self.top, text="Cancel", command=self.top.destroy).grid(
+            row=len(fields), column=1, columnspan=2, pady=10, sticky="e")
+
 
     def _save_member(self):
         data = (
@@ -1005,7 +1045,7 @@ class RecycleBinWindow:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=120, anchor="w")
             if col == "Badge":
-                self.tree.column(col, width=80, anchor="center")
+                self.tree.column(col, width=90, anchor="center")
         self.tree.pack(fill="both", expand=True, side="left")
 
         # Scrollbar
@@ -1112,44 +1152,65 @@ class SettingsWindow(tk.Toplevel):
         # Load settings
         self.settings = database.get_all_settings()
 
+        # Container frame to center everything
+        container = ttk.Frame(self)
+        container.pack(expand=True)
+
         row = 0
-        tk.Label(self, text="Dues Amounts", font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, pady=5)
+        tk.Label(container, text="Dues Amounts", font=("Arial", 12, "bold")).grid(
+            row=row, column=0, columnspan=2, pady=5
+        )
 
         row += 1
-        tk.Label(self, text="Probationary:").grid(row=row, column=0, sticky="w", padx=10)
+        tk.Label(container, text="Probationary:").grid(row=row, column=0, sticky="e", padx=10, pady=2)
         self.prob_var = tk.StringVar(value=self.settings.get("dues_probationary", "150"))
-        tk.Entry(self, textvariable=self.prob_var, justify="left").grid(row=row, column=1, padx=10)
+        tk.Entry(container, textvariable=self.prob_var, justify="center", width=15).grid(row=row, column=1, sticky="w", padx=10, pady=2)
 
         row += 1
-        tk.Label(self, text="Associate:").grid(row=row, column=0, sticky="w", padx=10)
+        tk.Label(container, text="Associate:").grid(row=row, column=0, sticky="e", padx=10, pady=2)
         self.assoc_var = tk.StringVar(value=self.settings.get("dues_associate", "300"))
-        tk.Entry(self, textvariable=self.assoc_var, justify="left").grid(row=row, column=1, padx=10)
+        tk.Entry(container, textvariable=self.assoc_var, justify="center", width=15).grid(row=row, column=1, sticky="w", padx=10, pady=2)
 
         row += 1
-        tk.Label(self, text="Active:").grid(row=row, column=0, sticky="w", padx=10)
+        tk.Label(container, text="Active:").grid(row=row, column=0, sticky="e", padx=10, pady=2)
         self.active_var = tk.StringVar(value=self.settings.get("dues_active", "150"))
-        tk.Entry(self, textvariable=self.active_var, justify="left").grid(row=row, column=1, padx=10)
+        tk.Entry(container, textvariable=self.active_var, justify="center", width=15).grid(row=row, column=1, sticky="w", padx=10, pady=2)
 
-        # NEW: Life Member dues
         row += 1
-        tk.Label(self, text="Life:").grid(row=row, column=0, sticky="w", padx=10)
+        tk.Label(container, text="Life:").grid(row=row, column=0, sticky="e", padx=10, pady=2)
         self.life_var = tk.StringVar(value=self.settings.get("dues_life", "0"))
-        tk.Entry(self, textvariable=self.life_var, justify="left", state="disabled").grid(row=row, column=1, padx=10)
+        tk.Entry(container, textvariable=self.life_var, justify="center", state="disabled", width=15).grid(row=row, column=1, sticky="w", padx=10, pady=2)
 
         row += 2
-        tk.Label(self, text="Default Year:", font=("Arial", 12, "bold")).grid(row=row, column=0, sticky="w", padx=10)
-        self.year_var = tk.StringVar(value=self.settings.get("default_year"))
-        tk.Entry(self, textvariable=self.year_var, justify="left").grid(row=row, column=1, padx=10)
+        # Heading above entry
+        tk.Label(container, text="Default Year:", font=("Arial", 12, "bold")).grid(
+            row=row, column=0, columnspan=2, pady=(10, 2)
+        )
+        row += 1
+
+        current_year = datetime.now().year
+        self.year_var = tk.StringVar(value=self.settings.get("default_year", str(current_year)))
+
+        tk.Spinbox(
+            container,
+            from_=current_year - 20,  # 20 years ago
+            to=current_year + 5,      # 5 years in future
+            textvariable=self.year_var,
+            width=10,
+            justify="center"
+        ).grid(row=row, column=0, columnspan=2, pady=(0, 5))
+
 
         row += 2
-        tk.Button(self, text="Save", command=self.save_settings).grid(row=row, column=0, columnspan=2, pady=15)
+        ttk.Button(container, text="Save", command=self.save_settings).grid(row=row, column=0, columnspan=2, pady=15)
+
 
     def save_settings(self):
         try:
             database.set_setting("dues_probationary", int(self.prob_var.get()))
             database.set_setting("dues_associate", int(self.assoc_var.get()))
             database.set_setting("dues_active", int(self.active_var.get()))
-            database.set_setting("dues_life", 0)   # NEW
+            database.set_setting("dues_life", 0)  # Life dues fixed/disabled
             database.set_setting("default_year", int(self.year_var.get()))
             messagebox.showinfo("Saved", "Settings have been updated.")
             self.destroy()
@@ -1224,9 +1285,9 @@ class DataTab:
         ttk.Button(popup, text="Cancel", command=popup.destroy).grid(row=len(self.entry_fields), column=1, pady=8)
 
 
-
 class MemberForm(tk.Frame):
     def __init__(self, parent, member_id=None, on_save_callback=None, select_tab=None):
+        super().__init__(parent)
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
 
@@ -1452,10 +1513,19 @@ class MemberForm(tk.Frame):
             self.role_var.set("")
             self.term_var.set("")
 
+
         # Committees
         committees_record = database.get_member_committees(self.member_id) or {}
-        committees_list = [c for c in committees_record if committees_record[c]]
-        self.committees_var.set(", ".join(committees_list))
+
+        # Exclude 'committee_id' if present and include only those marked as 1
+        selected_committees = [c for c, val in committees_record.items() if c != "committee_id" and str(val) == "1"]
+
+        # Map to readable names
+        readable_names = [c.replace("_", " ").title() for c in selected_committees]
+
+        # Update the read-only StringVar with vertical display
+        self.committees_var.set("\n".join(readable_names))
+
 
         # Update labels
         for tab_labels in self._display_labels.values():
@@ -1473,6 +1543,25 @@ class MemberForm(tk.Frame):
             ("Last Name", self.last_name_var),
             ("Date of Birth", self.dob_var)
         ], self._save_basic)
+
+
+    def _get_term_start(self):
+        term_text = self.term_var.get()
+        if "until" in term_text:
+            return term_text.split("until")[0].replace("from","").strip()
+        elif "from" in term_text:
+            return term_text.replace("from","").strip()
+        return ""
+
+    def _get_term_end(self):
+        term_text = self.term_var.get()
+        if "until" in term_text:
+            return term_text.split("until")[1].strip()
+        elif "until" in term_text:
+            return term_text.replace("until","").strip()
+        return ""
+
+
 
     def _edit_contact(self):
         self._open_edit_popup_generic("Contact", [
@@ -1496,8 +1585,10 @@ class MemberForm(tk.Frame):
             ("Card/Fob External Number", self.card_external_var),
             ("Waiver Signed", self.waiver_var),
             ("Role", self.role_var),
-            ("Term", self.term_var)
+            ("Term Start", tk.StringVar(value=self._get_term_start())),
+            ("Term End", tk.StringVar(value=self._get_term_end()))
         ]
+
 
         # Committees
         committee_names = [
@@ -1533,39 +1624,107 @@ class MemberForm(tk.Frame):
             committees_vars
         )
 
-    # ----- Generic popup editor -----
-    def _open_edit_popup_generic(self, title, field_names, save_callback, committees_vars=None):
+        # ----- Generic popup editor -----
+    def _open_edit_popup_generic(self, title, fields, save_callback, committees_vars=None):
         popup = tk.Toplevel(self.top)
-        popup.title(title)
-        frame = ttk.Frame(popup, padding=10)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=2)
+        popup.title(f"Edit {title}")
 
-        editors = []
-        for i, (label, var) in enumerate(field_names):
-            ttk.Label(frame, text=label + ":", font=("Arial", 12, "bold")).grid(row=i, column=0, padx=5, pady=3, sticky="e")
-            w = ttk.Entry(frame, textvariable=var, font=("Arial", 12))
-            w.grid(row=i, column=1, padx=5, pady=3, sticky="ew")
-            editors.append((label, var))
+        editors = {}
 
-        if committees_vars:
-            ttk.Label(frame, text="Committees:", font=("Arial", 12, "bold")).grid(row=len(field_names), column=0, sticky="ne")
-            c_frame = ttk.Frame(frame)
-            c_frame.grid(row=len(field_names), column=1, sticky="w")
-            for col, var in committees_vars.items():
-                ttk.Checkbutton(c_frame, text=col, variable=var).pack(anchor="w")
+        # Create bold font for labels
+        label_font = tkFont.Font(popup, family="TkDefaultFont", size=10, weight="bold")
 
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=len(field_names)+1, column=0, columnspan=2, pady=10)
+        membership_options = ["Probationary", "Associate", "Active", "Life", "Honorary", 
+                            "Waitlist", "Prospective", "Former"]
+        role_options = ["", "President", "Vice President", "Treasurer", "Secretary", "Trustee"]
+
+        for label_text, var in fields:
+            frame = ttk.Frame(popup)
+            frame.pack(fill="x", padx=10, pady=5)
+
+            ttk.Label(frame, text=label_text + ":", font=label_font).pack(side="left")
+
+            if label_text == "Membership Type":
+                combo = ttk.Combobox(frame, textvariable=var, values=membership_options,
+                                    state="readonly", width=27)
+                combo.set(var.get())  # preload current value
+                combo.pack(side="right", padx=5)
+                editors[label_text] = combo
+
+            elif label_text == "Role":
+                combo = ttk.Combobox(frame, textvariable=var, values=role_options,
+                                    state="readonly", width=27)
+                combo.set(var.get())  # preload current value
+                combo.pack(side="right", padx=5)
+                editors[label_text] = combo
+
+            else:
+                entry = ttk.Entry(frame, width=30)
+                entry.insert(0, var.get())
+                entry.pack(side="right", padx=5)
+                editors[label_text] = entry
+
+        if committees_vars is not None:
+            ttk.Label(popup, text="Committees:", font=label_font).pack(anchor="w", padx=10, pady=(10, 0))
+            for c, var in committees_vars.items():
+                ttk.Checkbutton(popup, text=c.replace("_", " ").title(), variable=var).pack(anchor="w", padx=20)
+
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(pady=10)
         ttk.Button(btn_frame, text="Save", command=lambda: save_callback(editors, popup)).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Cancel", command=popup.destroy).pack(side="left", padx=5)
 
+        # Auto-size and center
         popup.update_idletasks()
-        center_window(popup, popup.winfo_width(), popup.winfo_height())
+        width = popup.winfo_reqwidth()
+        height = popup.winfo_reqheight()
+        center_window(popup, width, height, self.top)
+
+
+
+
+
+
+    def _save_basic(self, editors, popup):
+        """Save Basic Info tab edits back to DB."""
+        first_name = editors["First Name"].get().strip()
+        last_name = editors["Last Name"].get().strip()
+        dob = editors["Date of Birth"].get().strip()
+
+        # Update in DB
+        database.update_member_basic(self.member_id, first_name, last_name, dob)
+
+        # Refresh UI
+        self._load_member_data()
+        popup.destroy()
+
+    def _save_contact(self, editors, popup):
+        """Save Contact Info tab edits back to DB."""
+        email  = editors["Email Address"].get().strip()
+        email2 = editors["Email Address 2"].get().strip()
+        phone  = editors["Phone Number"].get().strip()
+        phone2 = editors["Phone Number 2"].get().strip()
+        address = editors["Address"].get().strip()
+        city    = editors["City"].get().strip()
+        state   = editors["State"].get().strip()
+        zip_code= editors["Zip Code"].get().strip()
+
+
+        # Update in DB
+        database.update_member_contact(
+            self.member_id, email, email2, phone, phone2,
+            address, city, state, zip_code
+        )
+
+        # Refresh UI
+        self._load_member_data()
+        popup.destroy()
+
+
 
     # ----- Save membership edit -----
     def _save_membership_edit(self, editors, committees_vars, popup):
+        # ----- Membership info -----
         waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes","No") else "No"
         database.update_member_membership(
             member_id=self.member_id,
@@ -1579,26 +1738,22 @@ class MemberForm(tk.Frame):
             waiver=waiver_str
         )
 
-        # Role/Term
-        term_text = self.term_var.get()
-        term_start = term_end = ""
-        if "until" in term_text:
-            parts = term_text.split("until")
-            term_start = parts[0].replace("from","").strip()
-            term_end = parts[1].strip()
-        elif "from" in term_text:
-            term_start = term_text.replace("from","").strip()
-        elif "until" in term_text:
-            term_end = term_text.replace("until","").strip()
+        # ----- Role/Term -----
+        term_start = editors["Term Start"].get().strip()
+        term_end = editors["Term End"].get().strip()
         database.update_member_role(self.member_id, self.role_var.get(), term_start, term_end)
 
-        # Committees
-        database.update_member_committees(
-            self.member_id,
-            {k:int(v.get()) for k,v in committees_vars.items()}
-        )
 
-        # Refresh
+        # ----- Committees -----
+        committees_data = {}
+        for k, v in committees_vars.items():
+            try:
+                committees_data[k] = int(v.get())
+            except (ValueError, TypeError):
+                committees_data[k] = 0  # default if invalid
+        database.update_member_committees(self.member_id, committees_data)
+
+        # ----- Refresh UI -----
         self._load_member_data()
         if self.on_save_callback:
             self.on_save_callback(self.member_id)
@@ -2350,7 +2505,7 @@ class DuesReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "membership_type", "amount_due", "balance_due",
                         "year", "last_payment_date", "amount_paid", "method")
-        self.column_widths = (60, 150, 110, 80, 80, 60, 120, 80, 80)
+        self.column_widths = (60, 150, 110, 90, 90, 60, 120, 90, 90)
         super().__init__(parent, member_id, include_month=False)
         self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="dues"))
         self.populate_report()
@@ -2498,7 +2653,7 @@ class AttendanceReport(BaseReport):
 
 class WaiverReport(BaseReport):
     columns = ["badge", "name", "waiver"]
-    column_widths = [80, 200, 100]
+    column_widths = [90, 200, 100]
 
     def __init__(self, parent, member_id=None):
         super().__init__(parent, member_id, include_month=False)
