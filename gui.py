@@ -1224,6 +1224,7 @@ class DataTab:
         ttk.Button(popup, text="Cancel", command=popup.destroy).grid(row=len(self.entry_fields), column=1, pady=8)
 
 
+
 class MemberForm(tk.Frame):
     def __init__(self, parent, member_id=None, on_save_callback=None, select_tab=None):
         self.top = tk.Toplevel(parent)
@@ -1287,11 +1288,12 @@ class MemberForm(tk.Frame):
         self.sponsor_var = tk.StringVar()
         self.card_internal_var = tk.StringVar()
         self.card_external_var = tk.StringVar()
-        self.waiver_var = tk.StringVar()  # stores "Yes"/"No"
-        self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
+        self.waiver_var = tk.StringVar()
         self.role_var = tk.StringVar()
         self.term_var = tk.StringVar()
+        self.committees_var = tk.StringVar()  # read-only display in membership tab
 
+        self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
         self._display_labels = {}
 
         # ----- Build read-only tabs -----
@@ -1312,8 +1314,6 @@ class MemberForm(tk.Frame):
             ("Zip Code", self.zip_var)
         ], self._edit_contact, "contact")
 
-
-
         self._build_read_only_tab(
             self.tab_membership,
             [
@@ -1329,11 +1329,10 @@ class MemberForm(tk.Frame):
             "membership",
             right_fields=[
                 ("Role", self.role_var),
-                ("Term", self.term_var)
+                ("Term", self.term_var),
+                ("Committees", self.committees_var)
             ]
         )
-
-
 
         # ----- Data tabs -----
         self.dues_tab = DuesTab(self.tab_dues, self.member_id)
@@ -1350,7 +1349,7 @@ class MemberForm(tk.Frame):
         self.top.geometry(f"{width}x{height}")
         center_window(self.top, width, height)
 
-    # ----- Read-only tab builder -----
+    # ----- Build read-only tabs -----
     def _build_read_only_tab(self, tab, fields, edit_callback, tab_key, right_fields=None):
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_columnconfigure(1, weight=1)
@@ -1374,20 +1373,16 @@ class MemberForm(tk.Frame):
                 lbl.grid(row=row, column=1, sticky="w", padx=0, pady=4)
                 self._display_labels[tab_key][label_text] = (lbl, var)
             else:
-                # Empty filler for alignment
                 ttk.Label(tab, text="").grid(row=row, column=0)
                 ttk.Label(tab, text="").grid(row=row, column=1)
-
 
             # Right block
             if right_fields and row < len(right_fields):
                 label_text, var = right_fields[row]
-                # LEFT justify the right-side labels
                 ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=row, column=2, sticky="w", padx=0, pady=4)
                 lbl = ttk.Label(tab, text=var.get(), font=label_font)
-                lbl.grid(row=row, column=2, sticky="w", padx=75, pady=4)
+                lbl.grid(row=row, column=3, sticky="w", padx=0, pady=4)
                 self._display_labels[tab_key][label_text] = (lbl, var)
-
             elif right_fields:
                 ttk.Label(tab, text="").grid(row=row, column=2)
                 ttk.Label(tab, text="").grid(row=row, column=3)
@@ -1397,67 +1392,54 @@ class MemberForm(tk.Frame):
             column=0, columnspan=4, pady=12
         )
 
-
     # ----- Load member data -----
     def _load_member_data(self):
         if not self.member_id:
             return
 
-        # Fetch member record
         m = database.get_member_by_id(self.member_id)
         if not m:
             return
 
-        # Map DB columns to form variables using column names
-        mapping = {
-            "badge_number": m["badge_number"],
-            "membership_type": m["membership_type"],
-            "first_name": m["first_name"],
-            "last_name": m["last_name"],
-            "dob": m["dob"],
-            "email": m["email"],
-            "phone": m["phone"],
-            "address": m["address"],
-            "city": m["city"],
-            "state": m["state"],
-            "zip": m["zip"],
-            "join_date": m["join_date"],
-            "email2": m["email2"],
-            "phone2": m["phone2"] if "phone2" in m.keys() and m["phone2"] else "",
-            "sponsor": m["sponsor"],
-            "card_internal": m["card_internal"],
-            "card_external": m["card_external"],
-            "waiver": m["waiver"] if "waiver" in m.keys() and m["waiver"] else "No"
-        }
+        columns = [
+            ("badge_number_var", "badge_number", ""),
+            ("membership_type_var", "membership_type", ""),
+            ("first_name_var", "first_name", ""),
+            ("last_name_var", "last_name", ""),
+            ("dob_var", "dob", ""),
+            ("email_var", "email", ""),
+            ("email2_var", "email2", ""),
+            ("phone_var", "phone", ""),
+            ("phone2_var", "phone2", ""),
+            ("address_var", "address", ""),
+            ("city_var", "city", ""),
+            ("state_var", "state", ""),
+            ("zip_var", "zip", ""),
+            ("join_date_var", "join_date", ""),
+            ("sponsor_var", "sponsor", ""),
+            ("card_internal_var", "card_internal", ""),
+            ("card_external_var", "card_external", ""),
+            ("waiver_var", "waiver", "No")
+        ]
 
-        for var_name, value in mapping.items():
-            var = getattr(self, f"{var_name}_var", None)
-            if var:
-                if var_name in ("dob", "join_date") and value:
-                    try:
-                        dt = datetime.strptime(value, "%Y-%m-%d")
-                        var.set(dt.strftime("%m-%d-%Y"))
-                    except ValueError:
-                        var.set(value)
-                else:
-                    var.set(value or "")
+        for var_name, col_name, default in columns:
+            getattr(self, var_name).set(m[col_name] if col_name in m.keys() and m[col_name] is not None else default)
 
-        # Fetch role info from the roles table
+        # Role info
         role_record = database.get_member_role(self.member_id)
         if role_record:
             self.role_var.set(role_record["position"])
             start = role_record.get("term_start", "")
             end = role_record.get("term_end", "")
 
-            def fmt(date_str):
+            def fmt(d):
                 try:
-                    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%m-%d-%Y")
-                except Exception:
-                    return date_str or ""
+                    return datetime.strptime(d, "%Y-%m-%d").strftime("%m-%d-%Y")
+                except:
+                    return d or ""
 
             start_fmt = fmt(start)
             end_fmt = fmt(end)
-
             if start_fmt and end_fmt:
                 self.term_var.set(f"{start_fmt} until {end_fmt}")
             elif start_fmt:
@@ -1470,18 +1452,19 @@ class MemberForm(tk.Frame):
             self.role_var.set("")
             self.term_var.set("")
 
+        # Committees
+        committees_record = database.get_member_committees(self.member_id) or {}
+        committees_list = [c for c in committees_record if committees_record[c]]
+        self.committees_var.set(", ".join(committees_list))
 
-        # Update read-only labels
+        # Update labels
         for tab_labels in self._display_labels.values():
             for lbl, var in tab_labels.values():
                 lbl.config(text=var.get())
 
-        # Load data tabs
         self.work_tab.load_records(self.member_id)
         self.attendance_tab.load_records(self.member_id)
         self.dues_tab.load_records(self.member_id)
-
-
 
     # ----- Edit callbacks -----
     def _edit_basic(self):
@@ -1504,83 +1487,86 @@ class MemberForm(tk.Frame):
         ], self._save_contact)
 
     def _edit_membership(self):
-        self._open_edit_popup_generic("Membership", [
+        fields = [
             ("Badge Number", self.badge_number_var),
             ("Membership Type", self.membership_type_var),
             ("Join Date", self.join_date_var),
             ("Sponsor", self.sponsor_var),
             ("Card/Fob Internal Number", self.card_internal_var),
             ("Card/Fob External Number", self.card_external_var),
-            ("Waiver Signed", self.waiver_var)
-        ], self._save_membership)
+            ("Waiver Signed", self.waiver_var),
+            ("Role", self.role_var),
+            ("Term", self.term_var)
+        ]
+
+        # Committees
+        committee_names = [
+            "executive_committee",
+            "membership",
+            "trap",
+            "still_target",
+            "gun_bingo_social_events",
+            "rifle",
+            "pistol",
+            "archery",
+            "building_and_grounds",
+            "hunting"
+        ]
+
+    # Fetch current committee values from DB
+        committees_record = database.get_member_committees(self.member_id) or {}
+        committees_vars = {}
+        for c in committee_names:
+            val = committees_record.get(c, 0)
+            try:
+                val = int(val)
+            except (TypeError, ValueError):
+                val = 0
+            var = tk.IntVar(value=val)
+            committees_vars[c] = var
+
+
+        self._open_edit_popup_generic(
+            "Membership",
+            fields,
+            lambda editors, popup: self._save_membership_edit(editors, committees_vars, popup),
+            committees_vars
+        )
 
     # ----- Generic popup editor -----
-    def _open_edit_popup_generic(self, title, field_names, save_callback):
+    def _open_edit_popup_generic(self, title, field_names, save_callback, committees_vars=None):
         popup = tk.Toplevel(self.top)
         popup.title(title)
         frame = ttk.Frame(popup, padding=10)
         frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=1, uniform="a")
-        frame.columnconfigure(1, weight=2, uniform="a")
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=2)
 
         editors = []
         for i, (label, var) in enumerate(field_names):
-            ttk.Label(frame, text=label + ":", font=("Arial", 12)).grid(row=i, column=0, padx=5, pady=3, sticky="e")
-            if label == "Waiver Signed":
-                entry_var = tk.StringVar(value=var.get())
-                w = ttk.Combobox(frame, textvariable=entry_var, values=["Yes", "No"], state="readonly", font=("Arial", 12))
-            elif label == "Membership Type":
-                entry_var = tk.StringVar(value=var.get())
-                w = ttk.Combobox(frame, textvariable=entry_var, values=self.membership_types, state="readonly", font=("Arial", 12))
-            else:
-                entry_var = tk.StringVar(value=var.get())
-                w = ttk.Entry(frame, textvariable=entry_var, font=("Arial", 12))
+            ttk.Label(frame, text=label + ":", font=("Arial", 12, "bold")).grid(row=i, column=0, padx=5, pady=3, sticky="e")
+            w = ttk.Entry(frame, textvariable=var, font=("Arial", 12))
             w.grid(row=i, column=1, padx=5, pady=3, sticky="ew")
-            editors.append((var, entry_var))
+            editors.append((label, var))
+
+        if committees_vars:
+            ttk.Label(frame, text="Committees:", font=("Arial", 12, "bold")).grid(row=len(field_names), column=0, sticky="ne")
+            c_frame = ttk.Frame(frame)
+            c_frame.grid(row=len(field_names), column=1, sticky="w")
+            for col, var in committees_vars.items():
+                ttk.Checkbutton(c_frame, text=col, variable=var).pack(anchor="w")
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=len(field_names), column=0, columnspan=2, pady=10)
-        ttk.Button(btn_frame, text="Save", command=lambda: save()).pack(side="left", padx=5)
+        btn_frame.grid(row=len(field_names)+1, column=0, columnspan=2, pady=10)
+        ttk.Button(btn_frame, text="Save", command=lambda: save_callback(editors, popup)).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Cancel", command=popup.destroy).pack(side="left", padx=5)
-
-        def save():
-            for (var, entry_var), (label, _) in zip(editors, field_names):
-                if label == "Waiver Signed":
-                    var.set(entry_var.get())  # "Yes" or "No"
-                else:
-                    var.set(entry_var.get())
-            save_callback()
-            popup.destroy()
 
         popup.update_idletasks()
         center_window(popup, popup.winfo_width(), popup.winfo_height())
 
-    # ----- Save functions -----
-    def _save_basic(self):
-        database.update_member_basic(self.member_id,
-                                     self.first_name_var.get(),
-                                     self.last_name_var.get(),
-                                     self.dob_var.get())
-        self._load_member_data()
-        if self.on_save_callback:
-            self.on_save_callback(self.member_id)
-
-    def _save_contact(self):
-        database.update_member_contact(self.member_id,
-                                       self.email_var.get(),
-                                       self.email2_var.get(),
-                                       self.phone_var.get(),
-                                       self.phone2_var.get(),
-                                       self.address_var.get(),
-                                       self.city_var.get(),
-                                       self.state_var.get(),
-                                       self.zip_var.get())
-        self._load_member_data()
-        if self.on_save_callback:
-            self.on_save_callback(self.member_id)
-
-    def _save_membership(self):
-        waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes", "No") else "No"
+    # ----- Save membership edit -----
+    def _save_membership_edit(self, editors, committees_vars, popup):
+        waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes","No") else "No"
         database.update_member_membership(
             member_id=self.member_id,
             badge_number=self.badge_number_var.get(),
@@ -1592,9 +1578,31 @@ class MemberForm(tk.Frame):
             phone2=self.phone2_var.get(),
             waiver=waiver_str
         )
+
+        # Role/Term
+        term_text = self.term_var.get()
+        term_start = term_end = ""
+        if "until" in term_text:
+            parts = term_text.split("until")
+            term_start = parts[0].replace("from","").strip()
+            term_end = parts[1].strip()
+        elif "from" in term_text:
+            term_start = term_text.replace("from","").strip()
+        elif "until" in term_text:
+            term_end = term_text.replace("until","").strip()
+        database.update_member_role(self.member_id, self.role_var.get(), term_start, term_end)
+
+        # Committees
+        database.update_member_committees(
+            self.member_id,
+            {k:int(v.get()) for k,v in committees_vars.items()}
+        )
+
+        # Refresh
         self._load_member_data()
         if self.on_save_callback:
             self.on_save_callback(self.member_id)
+        popup.destroy()
 
 
 class DuesTab(DataTab):

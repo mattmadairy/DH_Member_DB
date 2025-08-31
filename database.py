@@ -1154,33 +1154,88 @@ def get_waiver_report():
     return [dict(row) for row in rows]
 
 
-def get_member_role(member_id):
-    """
-    Returns the role info for a member as a dictionary:
-    {"position": str, "term_start": str, "term_end": str}
-    If no role exists, returns None.
-    """
-    
-
+def update_member_role(member_id, position, term_start, term_end):
+    """Insert or update the role for a member."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT position, term_start, term_end
-        FROM roles
-        WHERE member_id = ?
-        LIMIT 1
-    """, (member_id,))
+    # Check if a role already exists for this member
+    cursor.execute("SELECT member_id FROM roles WHERE member_id = ?", (member_id,))
+    existing = cursor.fetchone()
 
+    if existing:
+        # Update existing record
+        cursor.execute("""
+            UPDATE roles
+            SET position = ?, term_start = ?, term_end = ?
+            WHERE member_id = ?
+        """, (position, term_start, term_end, member_id))
+    else:
+        # Insert new record
+        cursor.execute("""
+            INSERT INTO roles (member_id, position, term_start, term_end)
+            VALUES (?, ?, ?, ?)
+        """, (member_id, position, term_start, term_end))
+
+    conn.commit()
+    conn.close()
+
+
+def get_member_role(member_id):
+    """Return the role record for a member as a dictionary."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM roles WHERE member_id = ?", (member_id,))
     row = cursor.fetchone()
     conn.close()
 
     if row:
-        return {
-            "position": row["position"],
-            "term_start": row["term_start"],
-            "term_end": row["term_end"]
-        }
+        return dict(row)
     else:
         return None
+    
+    # Fetch the committees for a member
+def get_member_committees(member_id):
+    """
+    Fetch a member's committee memberships as a dict.
+    Returns a dict with column names as keys and values as stored (e.g., 'X' or '').
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get all committee column names from the table, excluding member_id
+    cursor.execute("PRAGMA table_info(committees)")
+    columns_info = cursor.fetchall()
+    committee_columns = [col[1] for col in columns_info if col[1] != "member_id"]
+
+    # Build query
+    cols_quoted = ', '.join(f'"{col}"' for col in committee_columns)
+    query = f'SELECT {cols_quoted} FROM committees WHERE member_id=?'
+    cursor.execute(query, (member_id,))
+    row = cursor.fetchone()
+
+    if row:
+        return dict(zip(committee_columns, row))
+    else:
+        # Return empty dict with all columns if member has no record
+        return {col: "" for col in committee_columns}
+
+
+
+def update_member_committees(member_id, committees_dict):
+    """
+    committees_dict: {'executive_committee': 1, 'membership': 0, ...}
+    """
+    set_clause = ", ".join([f"{col} = ?" for col in committees_dict.keys()])
+    values = list(committees_dict.values())
+    values.append(member_id)
+
+    query = f"UPDATE committees SET {set_clause} WHERE member_id = ?"
+
+    conn = get_connection()  # Make sure this returns sqlite3.Connection
+    cursor = conn.cursor()
+    cursor.execute(query, values)
+    conn.commit()
+    cursor.close()
+
