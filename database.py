@@ -1330,3 +1330,13 @@ def get_member_committees(member_id):
     conn.close()
     return dict(row) if row else {}
 
+# in database.py
+def get_executive_committee_members():
+    # Example: return a list of dicts
+    return [
+        {"badge_number": 101, "first_name": "Alice", "last_name": "Smith",
+         "roles": "President", "terms": "2023-2025", "notes": "N/A"},
+        {"badge_number": 102, "first_name": "Bob", "last_name": "Jones",
+         "roles": "Vice President", "terms": "2023-2025", "notes": "N/A"},
+        # etc.
+    ]

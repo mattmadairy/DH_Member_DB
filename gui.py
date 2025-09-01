@@ -6,6 +6,7 @@ import database
 from datetime import datetime
 import csv
 import calendar
+#import pyperclip
 #from reportlab.lib.pagesizes import letter
 #from reportlab.pdfgen import canvas
 
@@ -641,8 +642,8 @@ class MemberApp:
                 self.root.update()  # Force update
                 messagebox.showinfo(
                     "Mail Merge Export",
-                    f"Exported {len(emails)} email addresses.\n"
-                    f"Emails have been copied to the clipboard."
+                    f"Exported {len(emails)} email addresses."
+                    #f"\nEmails have been copied to the clipboard."
                 )
 
             # Use `after` to ensure focus is back to main window
@@ -2332,29 +2333,29 @@ class ReportsWindow(tk.Toplevel):
         resize_tabs()
         self.notebook.bind("<Configure>", resize_tabs)
         
-        
+    
+
+# ---------------- BaseReport ---------------- #
 class BaseReport(tk.Frame):
-    """Base class with common controls for member/year/month filters and CSV export"""
+    """Base class for all reports. Subclasses must define columns and _create_tree()."""
     def __init__(self, parent, member_id=None, include_month=True):
         super().__init__(parent)
         self.member_id = member_id
-        self.year_var = tk.IntVar()
-        self.month_var = tk.StringVar(value="All")
         self.include_month = include_month
         self.tree = None
+        self.year_var = tk.IntVar()
+        self.month_var = tk.StringVar(value="All")
+        self.exclude_names_var = tk.BooleanVar(value=False)
+
+        # Setup shared controls (year, month, CSV, print)
         self._setup_controls()
-        self._create_tree()
-        
+
+        # Populate the tree (tree must exist, so subclasses should call _create_tree first)
+        #self.populate_report()
 
     def _setup_controls(self):
         frame = tk.Frame(self)
         frame.pack(fill="x", pady=3)
-
-        try:
-            default_year = int(database.get_setting("default_year"))
-        except Exception:
-            default_year = datetime.now().year
-        self.year_var.set(default_year)
 
         bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
         tk.Label(frame, text="Year:", font=bold_font).pack(side="left", padx=(10,0))
@@ -2367,80 +2368,16 @@ class BaseReport(tk.Frame):
             months = ["All"] + list(calendar.month_name[1:])
             month_cb = ttk.Combobox(frame, values=months, textvariable=self.month_var, state="readonly", width=10)
             month_cb.pack(side="left", padx=(0,10))
-            month_cb.configure(background="white")
             self.month_var.trace_add("write", lambda *args: self.populate_report())
-
 
         tk.Button(frame, text="Export CSV", command=self.export_csv).pack(side="left", padx=5)
         tk.Button(frame, text="Print Report", command=self.print_report).pack(side="left", padx=5)
-
-        # Checkbox to exclude names
-        self.exclude_names_var = tk.BooleanVar(value=False)
         cb = ttk.Checkbutton(frame, text="Exclude Names From Print", variable=self.exclude_names_var)
         cb.pack(side="left", padx=10)
 
-
-    def _create_tree(self):
-        frame = tk.Frame(self)
-        frame.pack(fill="both", expand=True, pady=5)
-
-        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
-
-        for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_"," ").title(),
-                            command=lambda c=col: self.sort_column(c, False))
-            
-            # Default alignment rules
-            if col == "badge_number":   # Center badge numbers
-                anchor = "center"
-            elif col in ("amount_due", "balance_due", "amount_paid", "work_hours"):
-                anchor = "e"
-            else:
-                anchor = "w"
-
-            self.tree.column(col, width=width, anchor=anchor)
-
-
-    def sort_column(self, col, reverse):
-        # Extract data
-        data = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
-        
-        # Detect numeric columns
-        def try_num(val):
-            try:
-                return float(val)
-            except ValueError:
-                return val
-
-        data.sort(key=lambda t: try_num(t[0]), reverse=reverse)
-
-        # Rearrange rows
-        for index, (_, k) in enumerate(data):
-            self.tree.move(k, "", index)
-
-        # Reset all headings
-        for c in self.columns:
-            self.tree.heading(c, text=c.replace("_"," ").title(),
-                              command=lambda _c=c: self.sort_column(_c, False))
-
-        # Apply arrow
-        arrow = " ▲" if not reverse else " ▼"
-        self.tree.heading(col, text=col.replace("_"," ").title() + arrow,
-                          command=lambda: self.sort_column(col, not reverse))
-
-        # Track current sort
-        self._sort_column = col
-        self._sort_reverse = reverse
-
     def export_csv(self):
+        if self.tree is None:
+            return
         items = self.tree.get_children()
         if not items:
             messagebox.showwarning("Export CSV", "No data to export.")
@@ -2449,17 +2386,19 @@ class BaseReport(tk.Frame):
         if not path:
             return
         try:
-            with open(path,"w",newline="",encoding="utf-8") as f:
+            with open(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow([c.replace("_"," ").title() for c in self.columns])
+                writer.writerow([c.replace("_", " ").title() for c in self.columns])
                 for item in items:
-                    writer.writerow(self.tree.item(item,"values"))
+                    writer.writerow(self.tree.item(item, "values"))
             messagebox.showinfo("Export CSV", f"CSV exported successfully to {path}")
         except Exception as e:
             messagebox.showerror("Export CSV", f"Failed to export CSV: {e}")
 
     def print_report(self):
-        """Formatted print preview with headers, footers, page numbers, and aligned columns."""
+        """Generic print preview."""
+        if self.tree is None:
+            return
         items = self.tree.get_children()
         if not items:
             messagebox.showinfo("Print Report", "No data to print.")
@@ -2468,88 +2407,60 @@ class BaseReport(tk.Frame):
         org_name = "Dug Hill Rod & Gun Club"
         report_name = self.__class__.__name__.replace("Report", " Report")
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-        year = self.year_var.get()
-        month_name = self.month_var.get()
-        timeframe = f"{month_name} {year}" if month_name != "All" else f"Year {year}"
 
         headers = [c.replace("_", " ").title() for c in self.columns]
-        col_widths = [max(len(h), 12) for h in headers]
+
+        col_widths = [len(h) for h in headers]
         for idx, col in enumerate(self.columns):
             for item in items:
-                value = str(self.tree.item(item, "values")[idx])
-                if len(value) > col_widths[idx]:
-                    col_widths[idx] = len(value)
+                val = str(self.tree.item(item, "values")[idx])
+                if len(val) > col_widths[idx]:
+                    col_widths[idx] = len(val)
+        col_widths = [w + 2 for w in col_widths]  # padding
 
-        # alignment rules for printing
-        alignment = {}
-        for col in self.columns:
-            if col in ("badge", "year", "method", "last_payment_date"):
-                alignment[col] = "center"
-            elif col in ("amount_due", "balance_due", "amount_paid"):
-                alignment[col] = "right"
+        def format_val(col, val, width):
+            val = "" if val is None else str(val)
+            if col in ("badge", "badge_number", "roles", "terms"):
+                return f"{val:^{width}}"
             else:
-                alignment[col] = "left"
+                return f"{val:<{width}}"
 
-        # Pagination
+        def format_row(values):
+            return " ".join(format_val(c, v, w) for c, v, w in zip(self.columns, values, col_widths))
+
         lines_per_page = 40
         pages = []
         current_lines = []
 
         def add_header():
-            current_lines.append(org_name.center(sum(col_widths) + len(col_widths) * 3))
-            current_lines.append(report_name.center(sum(col_widths) + len(col_widths) * 3))
-           
-            current_lines.append(f"Timeframe: {timeframe}".center(sum(col_widths) + len(col_widths) * 3))
-            current_lines.append("=" * (sum(col_widths) + len(col_widths) * 3))
-            header_line = ""
-            for col, h, w in zip(self.columns, headers, col_widths):
-                if alignment[col] == "center":
-                    header_line += h.center(w + 3)
-                elif alignment[col] == "right":
-                    header_line += h.rjust(w + 3)
-                else:
-                    header_line += h.ljust(w + 3)
-            current_lines.append(header_line)
-            current_lines.append("-" * (sum(col_widths) + len(col_widths) * 3))
+            total_width = sum(col_widths) + (len(col_widths) - 1)
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row(headers))
+            current_lines.append("-" * total_width)
 
         add_header()
         row_count = 0
-
         for item in items:
             row = list(self.tree.item(item, "values"))
-            # Replace names with "*****" if checkbox is selected
-            if self.exclude_names_var.get():
-                # Assume the "name" column is index 1
-                if len(row) > 1:
-                    row[1] = "*****"
-
-            line = ""
-            for col, val, w in zip(self.columns, row, col_widths):
-                val = str(val)
-                if alignment[col] == "center":
-                    line += val.center(w + 3)
-                elif alignment[col] == "right":
-                    line += val.rjust(w + 3)
-                else:
-                    line += val.ljust(w + 3)
-            current_lines.append(line)
+            if self.exclude_names_var.get() and len(row) > 1:
+                row[1] = "*****"
+            current_lines.append(format_row(row))
             row_count += 1
-
             if row_count >= lines_per_page - 6:
                 pages.append(current_lines)
                 current_lines = []
                 row_count = 0
                 add_header()
-
         if current_lines:
             pages.append(current_lines)
 
         total_pages = len(pages)
-
         for i, page_lines in enumerate(pages, start=1):
-            footer_width = sum(col_widths) + len(col_widths) * 3
+            footer_width = sum(col_widths) + (len(col_widths) - 1)
             page_lines.append("=" * footer_width)
-            current_lines.append(f"Generated: {generation_dt}".center(sum(col_widths) + len(col_widths) * 3))
+            page_lines.append(f"Generated: {generation_dt}".center(footer_width))
             page_lines.append(f"Page {i} of {total_pages}".center(footer_width))
             page_lines.append("End of Report".center(footer_width))
 
@@ -2560,7 +2471,6 @@ class BaseReport(tk.Frame):
         text = tk.Text(print_window, wrap="none", font=("Courier", 10))
         text.insert("1.0", full_text)
         text.pack(fill="both", expand=True)
-
         vsb = ttk.Scrollbar(print_window, orient="vertical", command=text.yview)
         vsb.pack(side="right", fill="y")
         hsb = ttk.Scrollbar(print_window, orient="horizontal", command=text.xview)
@@ -2568,221 +2478,23 @@ class BaseReport(tk.Frame):
         text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
     def populate_report(self):
-        raise NotImplementedError("populate_report must be implemented in subclass")
-
-    def on_double_click(self, event, report_type=None):
-        selected = self.tree.selection()
-        if not selected:
-            return
-
-        badge_number = self.tree.item(selected[0], "values")[0]
-        member = database.get_member_by_badge(badge_number)
-        if member:
-            member_id = member[0]
-
-            # Map report type to the desired tab
-            tab_for_report = {
-                "dues": "dues",
-                "work_hours": "work_hours",
-                "attendance": "attendance"
-            }
-
-            selected_tab = tab_for_report.get(report_type, "basic")
-
-            MemberForm(self, member_id=member_id, select_tab=selected_tab)
+        """Must be implemented in each subclass."""
+        raise NotImplementedError
 
 
+# ---------------- DuesReport ---------------- #
 class DuesReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "membership_type", "amount_due", "balance_due",
                         "year", "last_payment_date", "amount_paid", "method")
-        self.column_widths = (60, 150, 110, 90, 90, 60, 120, 90, 90)
+        self.column_widths = (80, 150, 105, 90, 90, 60, 120, 90, 90)
         super().__init__(parent, member_id, include_month=False)
-        self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="dues"))
+        self._create_tree()
         self.populate_report()
-
-
-    def populate_report(self):
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-
-        year = self.year_var.get()
-        try:
-            members = database.get_all_members()
-            for m in members:
-                member_id = m[0]
-                if self.member_id and member_id != self.member_id:
-                    continue
-                badge = m[1]
-                name = f"{m[3]} {m[4]}"
-                membership_type = m[2]
-                amount_due = 0
-                if membership_type:
-                    setting_key = f"dues_{membership_type.lower()}"
-                    try:
-                        amount_due = float(database.get_setting(setting_key) or 0)
-                    except (ValueError, TypeError):
-                        amount_due = 0
-
-                dues = database.get_dues_by_member(member_id)
-                total_paid = 0
-                last_payment_date = ""
-                method = ""
-
-                for d in dues:
-                    try:
-                        payment_amount = float(d[4])
-                    except (ValueError, TypeError, IndexError):
-                        payment_amount = 0
-
-                    payment_date = d[2] if len(d) > 2 else ""
-                    try:
-                        payment_year = int(d[3]) if len(d) > 3 else year
-                    except (ValueError, TypeError, IndexError):
-                        payment_year = year
-
-                    payment_method = d[5] if len(d) > 5 else ""
-                    if payment_year != year:
-                        continue
-
-                    total_paid += payment_amount
-                    if payment_date and (not last_payment_date or payment_date > last_payment_date):
-                        last_payment_date = payment_date
-                        method = payment_method
-
-                if last_payment_date:
-                    try:
-                        dt = datetime.strptime(last_payment_date, "%Y-%m-%d")
-                        last_payment_date = dt.strftime("%m-%d-%Y")
-                    except ValueError:
-                        pass
-
-                balance_due = max(amount_due - total_paid, 0)
-                self.tree.insert("", "end", values=(
-                    badge, name, membership_type,
-                    f"{amount_due:.2f}", f"{balance_due:.2f}",
-                    year, last_payment_date,
-                    f"{total_paid:.2f}", method
-                ))
-        except Exception as e:
-            messagebox.showerror("Dues Report", f"Failed to fetch dues data:\n{e}")
-
-
-class Work_HoursReport(BaseReport):
-    def __init__(self, parent, member_id=None):
-        self.columns = ("badge", "name", "work_hours")
-        self.column_widths = (10, 260, 120)
-        super().__init__(parent, member_id)
-        self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="work_hours"))
-        self.populate_report()
-
-    def populate_report(self):
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-
-        year = self.year_var.get()
-        month_name = self.month_var.get()
-        if month_name == "All":
-            start_date = f"{year}-01-01"
-            end_date = f"{year}-12-31"
-        else:
-            month_index = list(calendar.month_name).index(month_name)
-            start_date = f"{year}-{month_index:02d}-01"
-            last_day = calendar.monthrange(year, month_index)[1]
-            end_date = f"{year}-{month_index:02d}-{last_day}"
-
-        try:
-            rows = database.get_work_hours_report(self.member_id, start_date, end_date)
-            for badge, first, last, total_hours in rows:
-                name = f"{last}, {first}"
-                self.tree.insert("", "end", values=(badge or "", name, total_hours or 0))
-        except Exception as e:
-            messagebox.showerror("Work Hours Report", f"Failed to fetch work hours data:\n{e}")
-
-
-class AttendanceReport(BaseReport):
-    def __init__(self, parent, member_id=None):
-        self.columns = ("badge", "name", "status")
-        self.column_widths = (90, 260, 120)
-        super().__init__(parent, member_id)
-        self.tree.bind("<Double-1>", lambda e: self.on_double_click(e, report_type="attendance"))
-        self.populate_report()
-
-    def populate_report(self):
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-
-        year = self.year_var.get()
-        month_name = self.month_var.get()
-
-        status_col = "status"
-        if status_col in self.tree["columns"]:
-            if month_name == "All":
-                self.tree.heading(status_col, text="Number of Meetings Attended")
-            else:
-                self.tree.heading(status_col, text="Status")
-
-        try:
-            members = database.get_all_members()
-            for m in members:
-                member_id = m[0]
-                if self.member_id and member_id != self.member_id:
-                    continue
-                badge = m[1]
-                name = f"{m[3]} {m[4]}"
-                if month_name == "All":
-                    total = database.count_member_attendance(member_id, year)
-                    self.tree.insert("", "end", values=(badge, name, total))
-                else:
-                    month_index = list(calendar.month_name).index(month_name)
-                    status = database.get_member_status_for_month(member_id, year, month_index)
-                    if status:
-                        self.tree.insert("", "end", values=(badge, name, status))
-        except Exception as e:
-            messagebox.showerror("Attendance Report", f"Failed to fetch attendance data:\n{e}")
-
-
-class WaiverReport(BaseReport):
-    columns = ["badge", "name", "waiver"]
-    column_widths = [90, 200, 100]
-
-    def __init__(self, parent, member_id=None):
-        super().__init__(parent, member_id, include_month=False)
-        self.populate_report()
-
-    def populate_report(self):
-        self.tree.delete(*self.tree.get_children())
-        rows = database.get_waiver_report()
-        for m in rows:
-            self.tree.insert("", "end", values=(m["badge_number"], m["name"], m["waiver"]))
-
-
-class CommitteesReport(BaseReport):
-    def __init__(self, parent, member_id=None):
-        # Add notes column
-        self.columns = ("badge_number", "name", "notes")
-        self.column_widths = (80, 250, 300)  # Adjusted width for Badge
-        super().__init__(parent, member_id, include_month=False)
-
-    def _setup_controls(self):
-        """Override to add Committee combobox at top."""
-        bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
-        tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5, 2))
-
-        raw_committees = database.get_committee_names()
-        committees = sorted([c for c in raw_committees if c.lower() != "committee id"])
-
-        self.committee_var = tk.StringVar()
-        cb = ttk.Combobox(self, values=committees, textvariable=self.committee_var, state="readonly")
-        cb.pack(anchor="w", padx=10, pady=(0, 5))
-        cb.bind("<<ComboboxSelected>>", lambda e: self.populate_report())
-
-        super()._setup_controls()
 
     def _create_tree(self):
         frame = tk.Frame(self)
         frame.pack(fill="both", expand=True, pady=5)
-
         self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
         vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
@@ -2792,38 +2504,255 @@ class CommitteesReport(BaseReport):
         hsb.grid(row=1, column=0, sticky="ew")
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
-
-        # Configure columns
         for col, width in zip(self.columns, self.column_widths):
-            # Rename badge_number column header to "Badge"
-            header_text = "Badge" if col == "badge_number" else col.replace("_", " ").title()
-            self.tree.heading(col, text=header_text,
-                              command=lambda c=col: self.sort_column(c, False))
-            anchor = "center" if col == "badge_number" else "w"
+            self.tree.heading(col, text=col.replace("_", " ").title())
+            anchor = "center" if col == "badge" else "e" if col in ("amount_due","balance_due","amount_paid","year") else "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
 
     def populate_report(self):
-        selected_committee = self.committee_var.get()
+        self.tree.delete(*self.tree.get_children())
+        year = self.year_var.get()
+        members = database.get_all_members()
+        for m in members:
+            badge = m[1]
+            name = f"{m[3]} {m[4]}"
+            membership_type = m[2]
+            amount_due = 0
+            setting_key = f"dues_{membership_type.lower()}" if membership_type else ""
+            try:
+                amount_due = float(database.get_setting(setting_key) or 0)
+            except:
+                pass
+            dues = database.get_dues_by_member(m[0])
+            total_paid,last_payment_date,method = 0,"",""
+            for d in dues:
+                try: amt=float(d[4])
+                except: amt=0
+                pay_year = int(d[3]) if len(d)>3 else year
+                if pay_year != year: continue
+                total_paid += amt
+                date = d[2] if len(d)>2 else ""
+                if date and (not last_payment_date or date>last_payment_date):
+                    last_payment_date = date
+                    method = d[5] if len(d)>5 else ""
+            if last_payment_date:
+                try: last_payment_date = datetime.strptime(last_payment_date,"%Y-%m-%d").strftime("%m-%d-%Y")
+                except: pass
+            balance_due = max(amount_due-total_paid,0)
+            self.tree.insert("", "end", values=(badge,name,membership_type,
+                                                f"{amount_due:.2f}",f"{balance_due:.2f}",
+                                                year,last_payment_date,f"{total_paid:.2f}",method))
+
+
+# ---------------- WorkHoursReport ---------------- #
+class Work_HoursReport(BaseReport):
+    def __init__(self,parent,member_id=None):
+        self.columns = ("badge","name","work_hours")
+        self.column_widths = (80,260,120)
+        super().__init__(parent,member_id)
+        self._create_tree()
+        self.populate_report()
+
+    def _create_tree(self):
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True, pady=5)
+        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        for col, width in zip(self.columns, self.column_widths):
+            self.tree.heading(col, text=col.replace("_"," ").title())
+            anchor = "center" if col in ("work_hours","badge") else "w"
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def populate_report(self):
+        self.tree.delete(*self.tree.get_children())
+        year = self.year_var.get()
+        month_name = self.month_var.get()
+        if month_name=="All":
+            start,end=f"{year}-01-01",f"{year}-12-31"
+        else:
+            month_idx = list(calendar.month_name).index(month_name)
+            start = f"{year}-{month_idx:02d}-01"
+            last_day = calendar.monthrange(year, month_idx)[1]
+            end = f"{year}-{month_idx:02d}-{last_day}"
+        rows = database.get_work_hours_report(self.member_id,start,end)
+        for badge,first,last,total_hours in rows:
+            name = f"{last}, {first}"
+            self.tree.insert("", "end", values=(badge or "",name,total_hours or 0))
+
+
+# ---------------- AttendanceReport ---------------- #
+class AttendanceReport(BaseReport):
+    def __init__(self,parent,member_id=None):
+        self.columns = ("badge","name","status")
+        self.column_widths = (90,260,120)
+        super().__init__(parent,member_id)
+        self._create_tree()
+        self.populate_report()
+
+    def _create_tree(self):
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True, pady=5)
+        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        for col, width in zip(self.columns, self.column_widths):
+            self.tree.heading(col, text=col.replace("_"," ").title())
+            anchor = "center" if col=="status" or col=="badge" else "w"
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def populate_report(self):
+        self.tree.delete(*self.tree.get_children())
+        year = self.year_var.get()
+        month_name = self.month_var.get()
+        members = database.get_all_members()
+        for m in members:
+            badge = m[1]
+            name = f"{m[3]} {m[4]}"
+            if month_name=="All":
+                total = database.count_member_attendance(m[0],year)
+            else:
+                month_idx = list(calendar.month_name).index(month_name)
+                total = database.get_member_status_for_month(m[0],year,month_idx)
+            self.tree.insert("", "end", values=(badge,name,total))
+
+
+# ---------------- WaiverReport ---------------- #
+class WaiverReport(BaseReport):
+    def __init__(self, parent, member_id=None):
+        self.columns = ["badge", "name", "waiver"]
+        self.column_widths = [80, 200, 100]
+        super().__init__(parent, member_id, include_month=False)
+        self._create_tree()
+        self.populate_report()
+
+    def _create_tree(self):
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True, pady=5)
+        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        for col, width in zip(self.columns, self.column_widths):
+            self.tree.heading(col, text=col.replace("_", " ").title())
+            anchor = "center" if col=="badge" else "w"
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def populate_report(self):
+        self.tree.delete(*self.tree.get_children())
+        rows = database.get_waiver_report()
+        for m in rows:
+            self.tree.insert("", "end", values=(m["badge_number"], m["name"], m["waiver"]))
+
+
+# ---------------- CommitteesReport ---------------- #
+class CommitteesReport(BaseReport):
+    def __init__(self, parent, member_id=None):
+        # default columns for regular committees
+        self.columns = ("badge_number", "name", "notes")
+        self.column_widths = (80, 250, 300)
+        super().__init__(parent, member_id, include_month=False)
+
+        # Add Committee combobox at top
+        self._setup_committee_filter()
+
+        # Create initial tree
+        self._create_tree()
+        self.populate_report()
+
+    def _setup_committee_filter(self):
+        """Add Committee combobox above the base controls."""
+        bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
+        tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5, 2))
+
+        # Include Executive Committee as an option
+        raw_committees = database.get_committee_names()
+        committees = sorted([c for c in raw_committees if c.lower() != "committee id"])
+        committees.append("Executive Committee")
+        self.committee_var = tk.StringVar()
+        cb = ttk.Combobox(self, values=committees, textvariable=self.committee_var, state="readonly")
+        cb.pack(anchor="w", padx=10, pady=(0, 5))
+        cb.bind("<<ComboboxSelected>>", lambda e: self._on_committee_change())
+
+    def _on_committee_change(self):
+        """Recreate the tree if the committee selection changes."""
+        selected = self.committee_var.get()
+        if selected == "Executive Committee":
+            self.columns = ("badge_number", "name", "roles", "terms", "notes")
+            self.column_widths = (80, 200, 150, 100, 250)
+        else:
+            self.columns = ("badge_number", "name", "notes")
+            self.column_widths = (80, 250, 300)
+        # Destroy old tree frame if it exists
+        if hasattr(self, "tree_frame") and self.tree_frame:
+            self.tree_frame.destroy()
+        self._create_tree()
+        self.populate_report()
+
+    def _create_tree(self):
+        """Create treeview inside its own frame."""
+        self.tree_frame = tk.Frame(self)
+        self.tree_frame.pack(fill="both", expand=True, pady=5)
+
+        self.tree = ttk.Treeview(self.tree_frame, columns=self.columns, show="headings")
+        vsb = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(self.tree_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        self.tree_frame.grid_rowconfigure(0, weight=1)
+        self.tree_frame.grid_columnconfigure(0, weight=1)
+
+        for col, width in zip(self.columns, self.column_widths):
+            header_text = "Badge" if col == "badge_number" else col.replace("_", " ").title()
+            self.tree.heading(col, text=header_text)
+            anchor = "center" if col in ("badge_number", "roles", "terms") else "w"
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def populate_report(self):
+        """Fill treeview with members of selected committee or executive committee."""
+        if self.tree is None:
+            return
+        self.tree.delete(*self.tree.get_children())
+
+        selected_committee = getattr(self, "committee_var", tk.StringVar()).get()
         if not selected_committee:
             return
 
-        rows = database.get_members_by_committee(selected_committee)
-
-        # Clear old data
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        # Insert new rows (include notes, handle None)
-        for row in rows:
-            badge_number = row.get("badge_number", "")
-            name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-            notes = row.get("notes") or ""  # blank if None
-
-            # Insert with notes wrapped using \n at reasonable width if needed
-            # For simplicity, just insert as-is; ttk.Treeview won't wrap text natively
-            self.tree.insert("", "end", values=(badge_number, name, notes))
-
-
+        if selected_committee == "Executive Committee":
+            rows = database.get_executive_committee_members()
+            for row in rows:
+                badge = row.get("badge_number", "")
+                name = f"{row.get('first_name','')} {row.get('last_name','')}".strip()
+                roles = row.get("roles", "")
+                terms = row.get("terms", "")
+                notes = row.get("notes", "")
+                self.tree.insert("", "end", values=(badge, name, roles, terms, notes))
+        else:
+            rows = database.get_members_by_committee(selected_committee)
+            for row in rows:
+                badge_number = row.get("badge_number", "")
+                name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
+                notes = row.get("notes") or ""
+                self.tree.insert("", "end", values=(badge_number, name, notes))
 
 
 
