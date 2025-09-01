@@ -2239,10 +2239,14 @@ class ReportsWindow(tk.Toplevel):
         AttendanceReport(attendance_tab, member_id).pack(fill="both", expand=True)
 
         # ---------------- Waiver Tab ---------------- #
-# ---------------- Waiver Tab ---------------- #
         waiver_tab_frame = ttk.Frame(notebook)
         notebook.add(waiver_tab_frame, text="Waivers")
         WaiverReport(waiver_tab_frame, member_id).pack(fill="both", expand=True)
+
+        # ---------------- Committees Tab ---------------- #
+        committees_tab_frame = ttk.Frame(notebook)
+        notebook.add(committees_tab_frame, text="Committees")
+        CommitteesReport(committees_tab_frame, member_id).pack(fill="both", expand=True)
 
 
 class BaseReport(tk.Frame):
@@ -2268,7 +2272,8 @@ class BaseReport(tk.Frame):
             default_year = datetime.now().year
         self.year_var.set(default_year)
 
-        tk.Label(frame, text="Year:").pack(side="left", padx=(10,0))
+        bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
+        tk.Label(frame, text="Year:", font=bold_font).pack(side="left", padx=(10,0))
         year_spin = tk.Spinbox(frame, from_=2000, to=2100, textvariable=self.year_var, width=6)
         year_spin.pack(side="left", padx=(0,10))
         self.year_var.trace_add("write", lambda *args: self.populate_report())
@@ -2305,19 +2310,20 @@ class BaseReport(tk.Frame):
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
-        # Alignment rules
         for col, width in zip(self.columns, self.column_widths):
             self.tree.heading(col, text=col.replace("_"," ").title(),
-                              command=lambda c=col: self.sort_column(c, False))
-            if col in ("badge", "year", "method", "last_payment_date"):
-                self.tree.column(col, width=width, anchor="center")
+                            command=lambda c=col: self.sort_column(c, False))
+            
+            # Default alignment rules
+            if col == "badge_number":   # Center badge numbers
+                anchor = "center"
             elif col in ("amount_due", "balance_due", "amount_paid", "work_hours"):
-                self.tree.column(col, width=width, anchor="e")
+                anchor = "e"
             else:
-                self.tree.column(col, width=width, anchor="w")
+                anchor = "w"
 
-        self._sort_column = None
-        self._sort_reverse = False
+            self.tree.column(col, width=width, anchor=anchor)
+
 
     def sort_column(self, col, reverse):
         # Extract data
@@ -2664,6 +2670,73 @@ class WaiverReport(BaseReport):
         rows = database.get_waiver_report()
         for m in rows:
             self.tree.insert("", "end", values=(m["badge_number"], m["name"], m["waiver"]))
+
+
+class CommitteesReport(BaseReport):
+    def __init__(self, parent, member_id=None):
+        # Set columns and widths before calling super().__init__()
+        self.columns = ("badge_number", "name")
+        self.column_widths = (100, 250)  # Badge column smaller
+        super().__init__(parent, member_id, include_month=False)
+
+    def _setup_controls(self):
+        """Override to add Committee combobox at top."""
+        # Add Committee combobox first
+        bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
+        tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5,2))
+        
+        raw_committees = database.get_committee_names()
+        committees = sorted([c for c in raw_committees if c.lower() != "committee id"])
+
+        self.committee_var = tk.StringVar()
+        cb = ttk.Combobox(self, values=committees, textvariable=self.committee_var, state="readonly")
+        cb.pack(anchor="w", padx=10, pady=(0,5))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.populate_report())
+
+        # Call parent to add year/month/export buttons if needed
+        super()._setup_controls()
+
+    def _create_tree(self):
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True, pady=5)
+
+        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        # Alignment and width rules
+        for col, width in zip(self.columns, self.column_widths):
+            self.tree.heading(col, text=col.replace("_", " ").title(),
+                            command=lambda c=col: self.sort_column(c, False))
+            if col == "badge_number":
+                self.tree.column(col, width=100, minwidth=30, anchor="center", stretch=False)
+            elif col == "name":
+                self.tree.column(col, width=250, anchor="w", stretch=True)
+
+
+    def populate_report(self):
+        selected_committee = self.committee_var.get()
+        if not selected_committee:
+            return
+
+        rows = database.get_members_by_committee(selected_committee)
+
+        # Clear old data
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        # Insert new rows
+        for row in rows:
+            badge_number = row["badge_number"]
+            name = f"{row['first_name']} {row['last_name']}"
+            self.tree.insert("", "end", values=(badge_number, name))
+
 
 
 if __name__ == "__main__":

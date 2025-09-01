@@ -1265,3 +1265,43 @@ def update_member_committees(member_id, committees_dict):
 
     conn.commit()
     cursor.close()
+
+
+def get_all_committees():
+    conn = get_connection()
+    """Return all committee column names from committees table (excluding id/member_id)."""
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(committees)")
+    return [row[1] for row in cur.fetchall() if row[1] not in ("id", "member_id")]
+
+
+def get_members_by_committee(committee_name):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Normalize the committee name to match your DB column naming
+    committee_column = committee_name.lower().replace(" ", "_")
+
+    query = f"""
+        SELECT m.id, m.badge_number, m.first_name, m.last_name
+        FROM members m
+        JOIN committees c ON m.id = c.member_id
+        WHERE c.{committee_column} = 1
+        ORDER BY m.last_name, m.first_name
+    """
+    cur.execute(query)
+    return cur.fetchall()
+
+
+def get_committee_names():
+    """Return a list of all committee column names (cleaned up for display)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(committees)")
+    columns = [row[1] for row in cur.fetchall()]
+
+    # Remove id/member_id if present
+    exclude = {"id", "member_id"}
+    committees = [c.replace("_", " ").title() for c in columns if c not in exclude]
+    return committees
+
