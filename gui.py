@@ -6,8 +6,8 @@ import database
 from datetime import datetime
 import csv
 import calendar
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+#from reportlab.lib.pagesizes import letter
+#from reportlab.pdfgen import canvas
 
 
 DATE_FMT = "%m/%d/%Y"
@@ -85,6 +85,7 @@ class MemberApp:
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="⬆️ Import ", command=self._show_import_dialog)
         file_menu.add_command(label="⬇️ Export Current Tab", command=self._show_export_dialog)
+        file_menu.add_command(label="📧     Export Emails (Mail Merge)", command=self._export_emails_for_mail_merge)
         file_menu.add_separator()
         file_menu.add_command(label="🖨  Print/Save Current Tab", command=self._print_members)
         file_menu.add_separator()
@@ -588,6 +589,68 @@ class MemberApp:
         ttk.Button(btn_frame, text="Save as PDF", command=save_report_pdf).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Save as CSV", command=save_report_csv).pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Close", command=preview.destroy).pack(side="right", padx=10)
+
+
+    # ---------- Mail Merge Export ----------
+    def _export_emails_for_mail_merge(self):
+        current_tab = self.notebook.tab(self.notebook.select(), "text")
+        tree = self.trees[current_tab]
+        items = tree.get_children()
+        if not items:
+            messagebox.showwarning("Mail Merge Export", "No members to export in this tab.")
+            return
+
+        try:
+            emails = []
+            for iid in items:
+                member = database.get_member_by_id(iid)
+                if member:
+                    primary = member[6] or ""
+                    secondary = member[13] or ""
+                    if primary.strip():
+                        emails.append(primary.strip())
+                    if secondary.strip():
+                        emails.append(secondary.strip())
+
+            if not emails:
+                messagebox.showinfo("Mail Merge Export", "No email addresses found for this tab.")
+                return
+
+            # Prompt for CSV save
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            default_filename = f"MailMerge_{current_tab.replace(' ','_')}_{timestamp}.csv"
+            path = filedialog.asksaveasfilename(
+                title="Export Emails for Mail Merge",
+                defaultextension=".csv",
+                initialfile=default_filename,
+                filetypes=[("CSV Files", "*.csv")]
+            )
+
+            if path:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Email Address"])
+                    for e in emails:
+                        writer.writerow([e])
+
+            # Copy emails to clipboard using Tkinter after a tiny delay
+            def copy_to_clipboard():
+                clipboard_text = "\n".join(emails)
+                self.root.clipboard_clear()
+                self.root.clipboard_append(clipboard_text)
+                self.root.update()  # Force update
+                messagebox.showinfo(
+                    "Mail Merge Export",
+                    f"Exported {len(emails)} email addresses.\n"
+                    f"Emails have been copied to the clipboard."
+                )
+
+            # Use `after` to ensure focus is back to main window
+            self.root.after(100, copy_to_clipboard)
+
+        except Exception as e:
+            messagebox.showerror("Mail Merge Export Error", f"Failed to export emails:\n{e}")
+
 
 
                 
@@ -1353,6 +1416,8 @@ class MemberForm(tk.Frame):
         self.role_var = tk.StringVar()
         self.term_var = tk.StringVar()
         self.committees_var = tk.StringVar()  # read-only display in membership tab
+        self.notes_var = tk.StringVar()  # for read-only display in membership tab
+
 
         self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
         self._display_labels = {}
@@ -1391,9 +1456,11 @@ class MemberForm(tk.Frame):
             right_fields=[
                 ("Role", self.role_var),
                 ("Term", self.term_var),
-                ("Committees", self.committees_var)
+                ("Committees", self.committees_var),
+                ("Committee Notes", self.notes_var)  # <- add Notes here
             ]
         )
+
 
         # ----- Data tabs -----
         self.dues_tab = DuesTab(self.tab_dues, self.member_id)
@@ -1410,7 +1477,7 @@ class MemberForm(tk.Frame):
         self.top.geometry(f"{width}x{height}")
         center_window(self.top, width, height)
 
-    # ----- Build read-only tabs -----
+        # ----- Build read-only tabs -----
     def _build_read_only_tab(self, tab, fields, edit_callback, tab_key, right_fields=None):
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_columnconfigure(1, weight=1)
@@ -1429,7 +1496,9 @@ class MemberForm(tk.Frame):
         for row in range(max_rows):
             if row < len(fields):
                 label_text, var = fields[row]
-                ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=row, column=0, sticky="w", padx=50, pady=4)
+                ttk.Label(tab, text=label_text + ":", font=big_font).grid(
+                    row=row, column=0, sticky="w", padx=50, pady=4
+                )
                 lbl = ttk.Label(tab, text=var.get(), font=label_font)
                 lbl.grid(row=row, column=1, sticky="w", padx=0, pady=4)
                 self._display_labels[tab_key][label_text] = (lbl, var)
@@ -1440,8 +1509,17 @@ class MemberForm(tk.Frame):
             # Right block
             if right_fields and row < len(right_fields):
                 label_text, var = right_fields[row]
-                ttk.Label(tab, text=label_text + ":", font=big_font).grid(row=row, column=2, sticky="w", padx=0, pady=4)
-                lbl = ttk.Label(tab, text=var.get(), font=label_font)
+                ttk.Label(tab, text=label_text + ":", font=big_font).grid(
+                    row=row, column=2, sticky="nw", padx=0, pady=4
+                )
+
+                # Wrap Notes text nicely
+                if label_text == "Committee Notes":
+                    lbl = ttk.Label(tab, text=var.get(), font=label_font,
+                                    wraplength=300, justify="left")
+                else:
+                    lbl = ttk.Label(tab, text=var.get(), font=label_font)
+
                 lbl.grid(row=row, column=3, sticky="w", padx=0, pady=4)
                 self._display_labels[tab_key][label_text] = (lbl, var)
             elif right_fields:
@@ -1452,6 +1530,7 @@ class MemberForm(tk.Frame):
             row=max_rows,
             column=0, columnspan=4, pady=12
         )
+
 
     # ----- Load member data -----
     def _load_member_data(self):
@@ -1516,15 +1595,14 @@ class MemberForm(tk.Frame):
 
         # Committees
         committees_record = database.get_member_committees(self.member_id) or {}
-
-        # Exclude 'committee_id' if present and include only those marked as 1
-        selected_committees = [c for c, val in committees_record.items() if c != "committee_id" and str(val) == "1"]
-
-        # Map to readable names
+        selected_committees = [c for c, val in committees_record.items()
+                            if c != "committee_id" and c != "notes" and str(val) == "1"]
         readable_names = [c.replace("_", " ").title() for c in selected_committees]
-
-        # Update the read-only StringVar with vertical display
         self.committees_var.set("\n".join(readable_names))
+
+        # Notes
+        self.notes_var.set(committees_record.get("notes", ""))
+
 
 
         # Update labels
@@ -1589,54 +1667,42 @@ class MemberForm(tk.Frame):
             ("Term End", tk.StringVar(value=self._get_term_end()))
         ]
 
-
-        # Committees
-        committee_names = [
-            "executive_committee",
-            "membership",
-            "trap",
-            "still_target",
-            "gun_bingo_social_events",
-            "rifle",
-            "pistol",
-            "archery",
-            "building_and_grounds",
-            "hunting"
-        ]
-
-    # Fetch current committee values from DB
+        # Fetch member's committee record
         committees_record = database.get_member_committees(self.member_id) or {}
-        committees_vars = {}
-        for c in committee_names:
-            val = committees_record.get(c, 0)
-            try:
-                val = int(val)
-            except (TypeError, ValueError):
-                val = 0
-            var = tk.IntVar(value=val)
-            committees_vars[c] = var
 
+        # Committees checkboxes
+        committee_names = [
+            "executive_committee", "membership", "trap", "still_target",
+            "gun_bingo_social_events", "rifle", "pistol", "archery",
+            "building_and_grounds", "hunting"
+        ]
+        committees_vars = {
+            c: tk.IntVar(value=int(committees_record.get(c, 0) or 0))
+            for c in committee_names
+        }
+
+        # Notes field from committees table
+        notes_var = tk.StringVar(value=committees_record.get("notes", ""))
 
         self._open_edit_popup_generic(
             "Membership",
             fields,
-            lambda editors, popup: self._save_membership_edit(editors, committees_vars, popup),
-            committees_vars
+            lambda editors, popup, notes_text: self._save_membership_edit(
+                editors, committees_vars, notes_text, popup
+            ),
+            committees_vars,
+            notes_var
         )
 
+
         # ----- Generic popup editor -----
-    def _open_edit_popup_generic(self, title, fields, save_callback, committees_vars=None):
+    def _open_edit_popup_generic(self, title, fields, save_callback,
+                                 committees_vars=None, notes_var=None):
         popup = tk.Toplevel(self.top)
         popup.title(f"Edit {title}")
-
         editors = {}
 
-        # Create bold font for labels
         label_font = tkFont.Font(popup, family="TkDefaultFont", size=10, weight="bold")
-
-        membership_options = ["Probationary", "Associate", "Active", "Life", "Honorary", 
-                            "Waitlist", "Prospective", "Former"]
-        role_options = ["", "President", "Vice President", "Treasurer", "Secretary", "Trustee"]
 
         for label_text, var in fields:
             frame = ttk.Frame(popup)
@@ -1645,16 +1711,19 @@ class MemberForm(tk.Frame):
             ttk.Label(frame, text=label_text + ":", font=label_font).pack(side="left")
 
             if label_text == "Membership Type":
-                combo = ttk.Combobox(frame, textvariable=var, values=membership_options,
-                                    state="readonly", width=27)
-                combo.set(var.get())  # preload current value
+                combo = ttk.Combobox(frame, textvariable=var,
+                                     values=["Probationary", "Associate", "Active", "Life", "Honorary",
+                                             "Waitlist", "Prospective", "Former"],
+                                     state="readonly", width=27)
+                combo.set(var.get())
                 combo.pack(side="right", padx=5)
                 editors[label_text] = combo
 
             elif label_text == "Role":
-                combo = ttk.Combobox(frame, textvariable=var, values=role_options,
-                                    state="readonly", width=27)
-                combo.set(var.get())  # preload current value
+                combo = ttk.Combobox(frame, textvariable=var,
+                                     values=["", "President", "Vice President", "Treasurer", "Secretary", "Trustee"],
+                                     state="readonly", width=27)
+                combo.set(var.get())
                 combo.pack(side="right", padx=5)
                 editors[label_text] = combo
 
@@ -1669,20 +1738,22 @@ class MemberForm(tk.Frame):
             for c, var in committees_vars.items():
                 ttk.Checkbutton(popup, text=c.replace("_", " ").title(), variable=var).pack(anchor="w", padx=20)
 
+        # Notes field
+        notes_text = None
+        if notes_var is not None:
+            ttk.Label(popup, text="Committee Notes:", font=label_font).pack(anchor="w", padx=10, pady=(10, 0))
+            notes_text = tk.Text(popup, width=60, height=5, wrap="word")
+            notes_text.insert("1.0", notes_var.get())
+            notes_text.pack(fill="x", padx=20, pady=5)
+
         btn_frame = ttk.Frame(popup)
         btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="Save", command=lambda: save_callback(editors, popup)).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Save",
+                   command=lambda: save_callback(editors, popup, notes_text)).pack(side="left", padx=5)
         ttk.Button(btn_frame, text="Cancel", command=popup.destroy).pack(side="left", padx=5)
 
-        # Auto-size and center
         popup.update_idletasks()
-        width = popup.winfo_reqwidth()
-        height = popup.winfo_reqheight()
-        center_window(popup, width, height, self.top)
-
-
-
-
+        center_window(popup, popup.winfo_reqwidth(), popup.winfo_reqheight(), self.top)
 
 
     def _save_basic(self, editors, popup):
@@ -1723,9 +1794,9 @@ class MemberForm(tk.Frame):
 
 
     # ----- Save membership edit -----
-    def _save_membership_edit(self, editors, committees_vars, popup):
+    def _save_membership_edit(self, editors, committees_vars, notes_text, popup):
         # ----- Membership info -----
-        waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes","No") else "No"
+        waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes", "No") else "No"
         database.update_member_membership(
             member_id=self.member_id,
             badge_number=self.badge_number_var.get(),
@@ -1743,14 +1814,11 @@ class MemberForm(tk.Frame):
         term_end = editors["Term End"].get().strip()
         database.update_member_role(self.member_id, self.role_var.get(), term_start, term_end)
 
+        # ----- Committees + Notes -----
+        committees_data = {k: int(v.get()) for k, v in committees_vars.items()}
+        if notes_text is not None:
+            committees_data["notes"] = notes_text.get("1.0", "end-1c").strip()
 
-        # ----- Committees -----
-        committees_data = {}
-        for k, v in committees_vars.items():
-            try:
-                committees_data[k] = int(v.get())
-            except (ValueError, TypeError):
-                committees_data[k] = 0  # default if invalid
         database.update_member_committees(self.member_id, committees_data)
 
         # ----- Refresh UI -----
@@ -2220,35 +2288,51 @@ class ReportsWindow(tk.Toplevel):
         self.grab_set()          # Make it modal (prevents interacting with main window)
         self.focus()             # Ensure it gets focus
 
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        style = ttk.Style()
+        #notebook = ttk.Notebook(self)
+        #notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        style.configure("CustomNotebook.TNotebook.Tab", padding=[10, 5], anchor="center")
+        self.notebook = ttk.Notebook(self, style="CustomNotebook.TNotebook")
+        self.notebook.pack(fill="both", expand=True)
 
         # ---------------- Dues Tab ---------------- #
-        dues_tab_frame = ttk.Frame(notebook)
-        notebook.add(dues_tab_frame, text="Dues")
+        dues_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(dues_tab_frame, text="Dues")
         DuesReport(dues_tab_frame, member_id).pack(fill="both", expand=True)
 
         # ---------------- Work Hours Tab ---------------- #
-        work_tab_frame = ttk.Frame(notebook)
-        notebook.add(work_tab_frame, text="Work Hours")
+        work_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(work_tab_frame, text="Work Hours")
         Work_HoursReport(work_tab_frame, member_id).pack(fill="both", expand=True)
 
         # ---------------- Attendance Tab ---------------- #
-        attendance_tab = ttk.Frame(notebook)
-        notebook.add(attendance_tab, text="Attendance")
+        attendance_tab = ttk.Frame(self.notebook)
+        self.notebook.add(attendance_tab, text="Attendance")
         AttendanceReport(attendance_tab, member_id).pack(fill="both", expand=True)
 
         # ---------------- Waiver Tab ---------------- #
-        waiver_tab_frame = ttk.Frame(notebook)
-        notebook.add(waiver_tab_frame, text="Waivers")
+        waiver_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(waiver_tab_frame, text="Waivers")
         WaiverReport(waiver_tab_frame, member_id).pack(fill="both", expand=True)
 
         # ---------------- Committees Tab ---------------- #
-        committees_tab_frame = ttk.Frame(notebook)
-        notebook.add(committees_tab_frame, text="Committees")
+        committees_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(committees_tab_frame, text="Committees")
         CommitteesReport(committees_tab_frame, member_id).pack(fill="both", expand=True)
 
+        # Resize tabs
+        def resize_tabs(event=None):
+            total_tabs = len(self.notebook.tabs())
+            if total_tabs == 0:
+                return
+            notebook_width = self.notebook.winfo_width()
+            tab_width = notebook_width // total_tabs
+            style.configure("CustomNotebook.TNotebook.Tab", width=tab_width)
 
+        resize_tabs()
+        self.notebook.bind("<Configure>", resize_tabs)
+        
+        
 class BaseReport(tk.Frame):
     """Base class with common controls for member/year/month filters and CSV export"""
     def __init__(self, parent, member_id=None, include_month=True):
@@ -2414,7 +2498,7 @@ class BaseReport(tk.Frame):
         def add_header():
             current_lines.append(org_name.center(sum(col_widths) + len(col_widths) * 3))
             current_lines.append(report_name.center(sum(col_widths) + len(col_widths) * 3))
-            current_lines.append(f"Generated: {generation_dt}".center(sum(col_widths) + len(col_widths) * 3))
+           
             current_lines.append(f"Timeframe: {timeframe}".center(sum(col_widths) + len(col_widths) * 3))
             current_lines.append("=" * (sum(col_widths) + len(col_widths) * 3))
             header_line = ""
@@ -2465,6 +2549,7 @@ class BaseReport(tk.Frame):
         for i, page_lines in enumerate(pages, start=1):
             footer_width = sum(col_widths) + len(col_widths) * 3
             page_lines.append("=" * footer_width)
+            current_lines.append(f"Generated: {generation_dt}".center(sum(col_widths) + len(col_widths) * 3))
             page_lines.append(f"Page {i} of {total_pages}".center(footer_width))
             page_lines.append("End of Report".center(footer_width))
 
@@ -2674,26 +2759,24 @@ class WaiverReport(BaseReport):
 
 class CommitteesReport(BaseReport):
     def __init__(self, parent, member_id=None):
-        # Set columns and widths before calling super().__init__()
-        self.columns = ("badge_number", "name")
-        self.column_widths = (100, 250)  # Badge column smaller
+        # Add notes column
+        self.columns = ("badge_number", "name", "notes")
+        self.column_widths = (80, 250, 300)  # Adjusted width for Badge
         super().__init__(parent, member_id, include_month=False)
 
     def _setup_controls(self):
         """Override to add Committee combobox at top."""
-        # Add Committee combobox first
         bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
-        tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5,2))
-        
+        tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5, 2))
+
         raw_committees = database.get_committee_names()
         committees = sorted([c for c in raw_committees if c.lower() != "committee id"])
 
         self.committee_var = tk.StringVar()
         cb = ttk.Combobox(self, values=committees, textvariable=self.committee_var, state="readonly")
-        cb.pack(anchor="w", padx=10, pady=(0,5))
+        cb.pack(anchor="w", padx=10, pady=(0, 5))
         cb.bind("<<ComboboxSelected>>", lambda e: self.populate_report())
 
-        # Call parent to add year/month/export buttons if needed
         super()._setup_controls()
 
     def _create_tree(self):
@@ -2710,15 +2793,14 @@ class CommitteesReport(BaseReport):
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
-        # Alignment and width rules
+        # Configure columns
         for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_", " ").title(),
-                            command=lambda c=col: self.sort_column(c, False))
-            if col == "badge_number":
-                self.tree.column(col, width=100, minwidth=30, anchor="center", stretch=False)
-            elif col == "name":
-                self.tree.column(col, width=250, anchor="w", stretch=True)
-
+            # Rename badge_number column header to "Badge"
+            header_text = "Badge" if col == "badge_number" else col.replace("_", " ").title()
+            self.tree.heading(col, text=header_text,
+                              command=lambda c=col: self.sort_column(c, False))
+            anchor = "center" if col == "badge_number" else "w"
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
 
     def populate_report(self):
         selected_committee = self.committee_var.get()
@@ -2731,11 +2813,17 @@ class CommitteesReport(BaseReport):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # Insert new rows
+        # Insert new rows (include notes, handle None)
         for row in rows:
-            badge_number = row["badge_number"]
-            name = f"{row['first_name']} {row['last_name']}"
-            self.tree.insert("", "end", values=(badge_number, name))
+            badge_number = row.get("badge_number", "")
+            name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
+            notes = row.get("notes") or ""  # blank if None
+
+            # Insert with notes wrapped using \n at reasonable width if needed
+            # For simplicity, just insert as-is; ttk.Treeview won't wrap text natively
+            self.tree.insert("", "end", values=(badge_number, name, notes))
+
+
 
 
 

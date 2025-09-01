@@ -1,8 +1,7 @@
 
-Committee reports - add notes column to tree and membership
-
-Reports window - make print like the member reports. open pdf to print
+Reports window - print preview formatting like the member reports. open pdf to print
 Reports window - save pdf button
+Reports Window - standardize the column widths and justification
 
 mail merge export
 import csv for meeting attendance captured from RFID scanner. 

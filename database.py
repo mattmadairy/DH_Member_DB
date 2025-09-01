@@ -1246,7 +1246,10 @@ def update_member_contact(member_id, email, email2, phone, phone2, address, city
     conn.close()
 
 
+# ------------------ Committees DB Functions ------------------
+
 def update_member_committees(member_id, committees_dict):
+    """Insert or update a member's committees and notes in the committees table."""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -1256,7 +1259,7 @@ def update_member_committees(member_id, committees_dict):
         # Insert default row
         cursor.execute("INSERT INTO committees (member_id) VALUES (?)", (member_id,))
 
-    # Update committees
+    # Update committees + notes
     set_clause = ", ".join([f"{col} = ?" for col in committees_dict.keys()])
     values = list(committees_dict.values())
     values.append(member_id)
@@ -1268,40 +1271,62 @@ def update_member_committees(member_id, committees_dict):
 
 
 def get_all_committees():
+    """Return all committee column names from committees table (excluding id/member_id/notes)."""
     conn = get_connection()
-    """Return all committee column names from committees table (excluding id/member_id)."""
     cur = conn.cursor()
     cur.execute("PRAGMA table_info(committees)")
-    return [row[1] for row in cur.fetchall() if row[1] not in ("id", "member_id")]
+    columns = [row[1] for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return [c for c in columns if c not in ("id", "member_id", "notes")]
+
+
+def get_committee_names():
+    """Return cleaned-up committee names for display (excluding id/member_id/notes)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(committees)")
+    columns = [row[1] for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+    exclude = {"id", "member_id", "notes"}
+    return [c.replace("_", " ").title() for c in columns if c not in exclude]
 
 
 def get_members_by_committee(committee_name):
+    """
+    Return all members in a given committee, including the 'notes' field.
+    Returns a list of dicts with keys: id, badge_number, first_name, last_name, notes.
+    """
     conn = get_connection()
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # Normalize the committee name to match your DB column naming
     committee_column = committee_name.lower().replace(" ", "_")
 
     query = f"""
-        SELECT m.id, m.badge_number, m.first_name, m.last_name
+        SELECT m.id, m.badge_number, m.first_name, m.last_name, c.notes
         FROM members m
         JOIN committees c ON m.id = c.member_id
         WHERE c.{committee_column} = 1
         ORDER BY m.last_name, m.first_name
     """
     cur.execute(query)
-    return cur.fetchall()
+    rows = [dict(r) for r in cur.fetchall()]
+
+    cur.close()
+    conn.close()
+    return rows
 
 
-def get_committee_names():
-    """Return a list of all committee column names (cleaned up for display)."""
+def get_member_committees(member_id):
+    """Return a dictionary of all committee flags + notes for a member."""
     conn = get_connection()
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute("PRAGMA table_info(committees)")
-    columns = [row[1] for row in cur.fetchall()]
-
-    # Remove id/member_id if present
-    exclude = {"id", "member_id"}
-    committees = [c.replace("_", " ").title() for c in columns if c not in exclude]
-    return committees
+    cur.execute("SELECT * FROM committees WHERE member_id = ?", (member_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return dict(row) if row else {}
 
