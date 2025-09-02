@@ -1,14 +1,14 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
 import tkinter.font as tkFont
-import os, tempfile, platform, subprocess
+import os, sys,tempfile, webbrowser, platform, subprocess
 import database
 from datetime import datetime
 import csv
 import calendar
 #import pyperclip
-#from reportlab.lib.pagesizes import letter
-#from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 
 DATE_FMT = "%m/%d/%Y"
@@ -2343,15 +2343,21 @@ class BaseReport(tk.Frame):
         self.member_id = member_id
         self.include_month = include_month
         self.tree = None
-        self.year_var = tk.IntVar()
+
+        # --- get default year from settings table ---
+        try:
+            default_year = database.get_setting("default_year")
+            if default_year is None:
+                default_year = datetime.now().year  # fallback
+        except Exception:
+            default_year = datetime.now().year      # fallback if query fails
+
+        self.year_var = tk.IntVar(value=int(default_year))
         self.month_var = tk.StringVar(value="All")
         self.exclude_names_var = tk.BooleanVar(value=False)
 
-        # Setup shared controls (year, month, CSV, print)
+        # Setup shared controls
         self._setup_controls()
-
-        # Populate the tree (tree must exist, so subclasses should call _create_tree first)
-        #self.populate_report()
 
     def _setup_controls(self):
         frame = tk.Frame(self)
@@ -2395,8 +2401,9 @@ class BaseReport(tk.Frame):
         except Exception as e:
             messagebox.showerror("Export CSV", f"Failed to export CSV: {e}")
 
+
     def print_report(self):
-        """Generic print preview."""
+        """Generic print preview with scrollbars and action buttons."""
         if self.tree is None:
             return
         items = self.tree.get_children()
@@ -2416,7 +2423,7 @@ class BaseReport(tk.Frame):
                 val = str(self.tree.item(item, "values")[idx])
                 if len(val) > col_widths[idx]:
                     col_widths[idx] = len(val)
-        col_widths = [w + 2 for w in col_widths]  # padding
+        col_widths = [w + 2 for w in col_widths]
 
         def format_val(col, val, width):
             val = "" if val is None else str(val)
@@ -2429,8 +2436,7 @@ class BaseReport(tk.Frame):
             return " ".join(format_val(c, v, w) for c, v, w in zip(self.columns, values, col_widths))
 
         lines_per_page = 40
-        pages = []
-        current_lines = []
+        pages, current_lines = [], []
 
         def add_header():
             total_width = sum(col_widths) + (len(col_widths) - 1)
@@ -2465,17 +2471,88 @@ class BaseReport(tk.Frame):
             page_lines.append("End of Report".center(footer_width))
 
         full_text = "\n\n".join("\n".join(p) for p in pages)
+        
+        def generate_pdf(path, full_text):
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
 
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)  # monospaced built-in font
+
+            width, height = letter
+            margin = 50
+            usable_width = width - (2 * margin)
+
+            # Courier 10pt is ~6 chars per mm, ~10 chars per 72pt inch
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+
+            y = height - margin
+            line_height = 12
+
+            for line in full_text.split("\n"):
+                # Ensure line fills the page width (like preview)
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+
+                y -= line_height
+                if y < margin:  # new page when reaching bottom
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+
+            c.save()
+
+
+
+        # --- Create print preview window ---
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
-        text = tk.Text(print_window, wrap="none", font=("Courier", 10))
+
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
         text.insert("1.0", full_text)
-        text.pack(fill="both", expand=True)
-        vsb = ttk.Scrollbar(print_window, orient="vertical", command=text.yview)
-        vsb.pack(side="right", fill="y")
-        hsb = ttk.Scrollbar(print_window, orient="horizontal", command=text.xview)
-        hsb.pack(side="bottom", fill="x")
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+
         text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # --- Button panel ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            if not path:
+                return
+            generate_pdf(path, full_text)
+            messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)  # lets user print from system PDF viewer
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
+
+
+
 
     def populate_report(self):
         """Must be implemented in each subclass."""
@@ -2543,13 +2620,140 @@ class DuesReport(BaseReport):
                                                 f"{amount_due:.2f}",f"{balance_due:.2f}",
                                                 year,last_payment_date,f"{total_paid:.2f}",method))
 
+    def print_report(self):
+        """Print preview of dues report."""
+        if self.tree is None:
+            return
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Print Report", "No data to print.")
+            return
+
+        org_name = "Dug Hill Rod & Gun Club"
+        report_name = f"Dues Report - Year {self.year_var.get()}"
+        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+
+        rows = [self.tree.item(item, "values") for item in items]
+        page_width = 100  # wider for financial data
+        num_cols = len(self.columns)
+        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
+        raw_widths = [max(raw_widths[i], len(self.columns[i])) for i in range(num_cols)]
+        total_raw = sum(raw_widths)
+        col_widths = [max(5, int(w / total_raw * page_width)) for w in raw_widths]
+        diff = page_width - sum(col_widths)
+        if diff != 0:
+            col_widths[-1] += diff
+
+        def format_row(values):
+            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+
+        lines_per_page = 35
+        pages, current_lines = [], []
+
+        def add_header():
+            total_width = page_width
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row([c.replace("_"," ").title() for c in self.columns]))
+            current_lines.append("-" * total_width)
+
+        add_header()
+        row_count = 0
+        for row in rows:
+            row_vals = list(row)
+            if self.exclude_names_var.get() and len(row_vals) > 1:
+                row_vals[1] = "*****"
+            current_lines.append(format_row(row_vals))
+            row_count += 1
+            if row_count >= lines_per_page - 6:
+                pages.append(current_lines)
+                current_lines = []
+                row_count = 0
+                add_header()
+        if current_lines:
+            pages.append(current_lines)
+
+        total_pages = len(pages)
+        for i, page_lines in enumerate(pages, start=1):
+            page_lines.append("=" * page_width)
+            page_lines.append(f"Generated: {generation_dt}".center(page_width))
+            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
+            page_lines.append("End of Report".center(page_width))
+
+        full_text = "\n\n".join("\n".join(p) for p in pages)
+
+        # PDF generation helper
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
+
+        # --- Print Preview Window ---
+        print_window = tk.Toplevel(self)
+        print_window.title(f"{report_name} - Print Preview")
+        center_window(print_window, width=800, height=600, parent=self.winfo_toplevel())
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
+        text.insert("1.0", full_text)
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # --- Buttons ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            if path:
+                generate_pdf(path, full_text)
+                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
 # ---------------- WorkHoursReport ---------------- #
 class Work_HoursReport(BaseReport):
-    def __init__(self,parent,member_id=None):
+    def __init__(self, parent, member_id=None):
         self.columns = ("badge","name","work_hours")
         self.column_widths = (80,260,120)
-        super().__init__(parent,member_id)
+        super().__init__(parent, member_id)
         self._create_tree()
         self.populate_report()
 
@@ -2575,7 +2779,7 @@ class Work_HoursReport(BaseReport):
         year = self.year_var.get()
         month_name = self.month_var.get()
         if month_name=="All":
-            start,end=f"{year}-01-01",f"{year}-12-31"
+            start, end = f"{year}-01-01", f"{year}-12-31"
         else:
             month_idx = list(calendar.month_name).index(month_name)
             start = f"{year}-{month_idx:02d}-01"
@@ -2586,13 +2790,143 @@ class Work_HoursReport(BaseReport):
             name = f"{last}, {first}"
             self.tree.insert("", "end", values=(badge or "",name,total_hours or 0))
 
+    def print_report(self):
+        """Print preview of work hours report with dynamic month/year header."""
+        if self.tree is None:
+            return
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Print Report", "No data to print.")
+            return
+
+        org_name = "Dug Hill Rod & Gun Club"
+        if self.month_var.get() == "All":
+            report_name = f"Work Hours Report - Yearly {self.year_var.get()}"
+        else:
+            report_name = f"Work Hours Report - {self.month_var.get()} {self.year_var.get()}"
+        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+
+        rows = [self.tree.item(item, "values") for item in items]
+        page_width = 85
+        num_cols = len(self.columns)
+        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
+        raw_widths = [max(raw_widths[i], len(self.columns[i])) for i in range(num_cols)]
+        total_raw = sum(raw_widths)
+        col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
+        diff = page_width - sum(col_widths)
+        if diff != 0:
+            col_widths[-1] += diff
+
+        def format_row(values):
+            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+
+        lines_per_page = 40
+        pages, current_lines = [], []
+
+        def add_header():
+            total_width = page_width
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row([c.replace("_"," ").title() for c in self.columns]))
+            current_lines.append("-" * total_width)
+
+        add_header()
+        row_count = 0
+        for row in rows:
+            row_vals = list(row)
+            if self.exclude_names_var.get() and len(row_vals) > 1:
+                row_vals[1] = "*****"
+            current_lines.append(format_row(row_vals))
+            row_count += 1
+            if row_count >= lines_per_page - 6:
+                pages.append(current_lines)
+                current_lines = []
+                row_count = 0
+                add_header()
+        if current_lines:
+            pages.append(current_lines)
+
+        total_pages = len(pages)
+        for i, page_lines in enumerate(pages, start=1):
+            page_lines.append("=" * page_width)
+            page_lines.append(f"Generated: {generation_dt}".center(page_width))
+            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
+            page_lines.append("End of Report".center(page_width))
+
+        full_text = "\n\n".join("\n".join(p) for p in pages)
+
+        # PDF generation helper
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
+
+        # --- Print Preview Window ---
+        print_window = tk.Toplevel(self)
+        print_window.title(f"{report_name} - Print Preview")
+        center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
+        text.insert("1.0", full_text)
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # --- Buttons ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            if path:
+                generate_pdf(path, full_text)
+                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
 # ---------------- AttendanceReport ---------------- #
 class AttendanceReport(BaseReport):
-    def __init__(self,parent,member_id=None):
-        self.columns = ("badge","name","status")
-        self.column_widths = (90,260,120)
-        super().__init__(parent,member_id)
+    def __init__(self, parent, member_id=None):
+        self.columns = ("badge", "name", "status")
+        self.column_widths = (90, 260, 120)
+        super().__init__(parent, member_id)
         self._create_tree()
         self.populate_report()
 
@@ -2609,8 +2943,8 @@ class AttendanceReport(BaseReport):
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
         for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_"," ").title())
-            anchor = "center" if col=="status" or col=="badge" else "w"
+            self.tree.heading(col, text=col.replace("_", " ").title())
+            anchor = "center" if col in ("status", "badge") else "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
 
     def populate_report(self):
@@ -2621,12 +2955,159 @@ class AttendanceReport(BaseReport):
         for m in members:
             badge = m[1]
             name = f"{m[3]} {m[4]}"
-            if month_name=="All":
-                total = database.count_member_attendance(m[0],year)
+            if month_name == "All":
+                total = database.count_member_attendance(m[0], year)
             else:
                 month_idx = list(calendar.month_name).index(month_name)
-                total = database.get_member_status_for_month(m[0],year,month_idx)
-            self.tree.insert("", "end", values=(badge,name,total))
+                total = database.get_member_status_for_month(m[0], year, month_idx)
+            self.tree.insert("", "end", values=(badge, name, total))
+
+    def print_report(self):
+        """Print preview of attendance report with month/year in header."""
+        if self.tree is None:
+            return
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Print Report", "No data to print.")
+            return
+
+        org_name = "Dug Hill Rod & Gun Club"
+        report_name = "Attendance Report"
+        month_name = self.month_var.get()
+        month_display = month_name if month_name != "All" else "Yearly"
+        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+
+        # Gather rows from the tree
+        rows = [self.tree.item(item, "values") for item in items]
+        headers = [c.replace("_", " ").title() for c in self.columns]
+
+        page_width = 85
+        num_cols = len(self.columns)
+
+        # Compute column widths
+        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
+        raw_widths = [max(raw_widths[i], len(headers[i])) for i in range(num_cols)]
+        total_raw = sum(raw_widths)
+        col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
+        diff = page_width - sum(col_widths)
+        if diff != 0:
+            col_widths[-1] += diff
+
+        def format_row(values):
+            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+
+        lines_per_page = 40
+        pages, current_lines = [], []
+
+        # Header function
+        def add_header():
+            total_width = page_width
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+
+            # Show month only if not yearly
+            month_name = self.month_var.get()
+            year_display = str(self.year_var.get())
+            if month_name != "All":
+                current_lines.append(f"Month: {month_name}    Year: {year_display}".center(total_width))
+            else:
+                current_lines.append(f"Year: {year_display}".center(total_width))
+
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row(headers))
+            current_lines.append("-" * total_width)
+
+
+        add_header()
+        row_count = 0
+        for row in rows:
+            row_vals = list(row)
+            if self.exclude_names_var.get() and len(row_vals) > 1:
+                row_vals[1] = "*****"
+            current_lines.append(format_row(row_vals))
+            row_count += 1
+            if row_count >= lines_per_page - 6:
+                pages.append(current_lines)
+                current_lines = []
+                row_count = 0
+                add_header()
+        if current_lines:
+            pages.append(current_lines)
+
+        total_pages = len(pages)
+        for i, page_lines in enumerate(pages, start=1):
+            page_lines.append("=" * page_width)
+            page_lines.append(f"Generated: {generation_dt}".center(page_width))
+            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
+            page_lines.append("End of Report".center(page_width))
+
+        full_text = "\n\n".join("\n".join(p) for p in pages)
+
+        # PDF generation, preview, buttons remain the same as your previous print_report
+
+
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
+
+        # --- Print Preview ---
+        print_window = tk.Toplevel(self)
+        print_window.title(f"{report_name} - Print Preview")
+        center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
+        text.insert("1.0", full_text)
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # --- Buttons ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+            if path:
+                generate_pdf(path, full_text)
+                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
 
 # ---------------- WaiverReport ---------------- #
@@ -2650,9 +3131,10 @@ class WaiverReport(BaseReport):
         hsb.grid(row=1, column=0, sticky="ew")
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
+
         for col, width in zip(self.columns, self.column_widths):
             self.tree.heading(col, text=col.replace("_", " ").title())
-            anchor = "center" if col=="badge" else "w"
+            anchor = "center" if col == "badge" else "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
 
     def populate_report(self):
@@ -2660,6 +3142,141 @@ class WaiverReport(BaseReport):
         rows = database.get_waiver_report()
         for m in rows:
             self.tree.insert("", "end", values=(m["badge_number"], m["name"], m["waiver"]))
+
+    def print_report(self):
+        """Print preview of waiver report."""
+        if self.tree is None:
+            return
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Print Report", "No data to print.")
+            return
+
+        org_name = "Dug Hill Rod & Gun Club"
+        report_name = "Waiver Report"
+        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+
+        # Gather rows from the tree
+        rows = [self.tree.item(item, "values") for item in items]
+
+        # Format column headers nicely
+        headers = [c.replace("_", " ").title() for c in self.columns]
+
+        # Determine page width (characters)
+        page_width = 85
+        num_cols = len(self.columns)
+
+        # Compute column widths proportionally
+        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
+        raw_widths = [max(raw_widths[i], len(headers[i])) for i in range(num_cols)]
+        total_raw = sum(raw_widths)
+        col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
+        diff = page_width - sum(col_widths)
+        if diff != 0:
+            col_widths[-1] += diff
+
+        def format_row(values):
+            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+
+        lines_per_page = 40
+        pages, current_lines = [], []
+
+        def add_header():
+            total_width = page_width
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row(headers))
+            current_lines.append("-" * total_width)
+
+        add_header()
+        row_count = 0
+        for row in rows:
+            row_vals = list(row)
+            if self.exclude_names_var.get() and len(row_vals) > 1:
+                row_vals[1] = "*****"
+            current_lines.append(format_row(row_vals))
+            row_count += 1
+            if row_count >= lines_per_page - 6:
+                pages.append(current_lines)
+                current_lines = []
+                row_count = 0
+                add_header()
+        if current_lines:
+            pages.append(current_lines)
+
+        total_pages = len(pages)
+        for i, page_lines in enumerate(pages, start=1):
+            page_lines.append("=" * page_width)
+            page_lines.append(f"Generated: {generation_dt}".center(page_width))
+            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
+            page_lines.append("End of Report".center(page_width))
+
+        full_text = "\n\n".join("\n".join(p) for p in pages)
+
+        # PDF generation helper
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
+
+        # --- Print Preview Window ---
+        print_window = tk.Toplevel(self)
+        print_window.title(f"{report_name} - Print Preview")
+        center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
+        text.insert("1.0", full_text)
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # --- Buttons ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            if path:
+                generate_pdf(path, full_text)
+                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
 
 # ---------------- CommitteesReport ---------------- #
@@ -2700,7 +3317,7 @@ class CommitteesReport(BaseReport):
         else:
             self.columns = ("badge_number", "name", "notes")
             self.column_widths = (80, 250, 300)
-        # Destroy old tree frame if it exists
+
         if hasattr(self, "tree_frame") and self.tree_frame:
             self.tree_frame.destroy()
         self._create_tree()
@@ -2753,6 +3370,150 @@ class CommitteesReport(BaseReport):
                 name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
                 notes = row.get("notes") or ""
                 self.tree.insert("", "end", values=(badge_number, name, notes))
+
+    def print_report(self):
+        """Print preview of the committee/executive committee report."""
+        if self.tree is None:
+            return
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Print Report", "No data to print.")
+            return
+
+        org_name = "Dug Hill Rod & Gun Club"
+        report_name = f"{self.committee_var.get()} Roster"
+        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+
+        # Format column headers nicely
+        headers = [c.replace("_", " ").title() for c in self.columns]
+
+
+        # Gather rows from the tree
+        rows = [self.tree.item(item, "values") for item in items]
+
+
+        # Determine page width (characters) and scale columns
+        page_width = 85
+        num_cols = len(self.columns)
+
+        # Get max content width per column
+        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
+        # Include headers
+        raw_widths = [max(raw_widths[i], len(self.columns[i])) for i in range(num_cols)]
+
+        total_raw = sum(raw_widths)
+        col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
+        # Adjust rounding difference
+        diff = page_width - sum(col_widths)
+        if diff != 0:
+            col_widths[-1] += diff
+
+        def format_row(values):
+            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+
+        # Build report text
+        lines_per_page = 40
+        pages, current_lines = [], []
+
+        # Header
+        def add_header():
+            total_width = page_width
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row(headers))  # <-- use formatted headers
+            current_lines.append("-" * total_width)
+
+
+        add_header()
+        row_count = 0
+        for row in rows:
+            row_vals = list(row)
+            if self.exclude_names_var.get() and len(row_vals) > 1:
+                row_vals[1] = "*****"
+            current_lines.append(format_row(row_vals))
+            row_count += 1
+            if row_count >= lines_per_page - 6:
+                pages.append(current_lines)
+                current_lines = []
+                row_count = 0
+                add_header()
+        if current_lines:
+            pages.append(current_lines)
+
+        total_pages = len(pages)
+        for i, page_lines in enumerate(pages, start=1):
+            page_lines.append("=" * page_width)
+            page_lines.append(f"Generated: {generation_dt}".center(page_width))
+            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
+            page_lines.append("End of Report".center(page_width))
+
+        full_text = "\n\n".join("\n".join(p) for p in pages)
+
+        # PDF generation helper
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
+
+        # --- Print Preview Window ---
+        print_window = tk.Toplevel(self)
+        print_window.title(f"{report_name} - Print Preview")
+        center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
+        text.insert("1.0", full_text)
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # --- Buttons ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            if path:
+                generate_pdf(path, full_text)
+                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
 
 
