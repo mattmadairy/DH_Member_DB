@@ -15,6 +15,10 @@ def get_connection():
     except sqlite3.Error as e:
         print(f"Connection error: {e}")
         return None
+    
+
+def get_conn():
+    return sqlite3.connect(DB_NAME)
 
     
 # ------------------ Initialization ----------------- #
@@ -263,8 +267,6 @@ def update_member_membership(member_id, badge_number, membership_type, join_date
     conn.commit()
     conn.close()
 
-
-
 def delete_member(member_id):
     conn = get_connection()
     c = conn.cursor()
@@ -420,8 +422,6 @@ def restore_member_from_recycle_bin(recycle_id, db_path="members.db"):
     conn.commit()
     conn.close()
 
-
-
 def restore_member(member_id):
     conn = get_connection()
     c = conn.cursor()
@@ -452,8 +452,6 @@ def get_member_by_badge(badge):
     conn.close()
     return row
 
-
-
 def get_all_members():
     conn = get_connection()
     c = conn.cursor()
@@ -483,7 +481,6 @@ def add_dues_payment(member_id, amount, payment_date, method=None, notes=None, y
     """, (member_id, amount, payment_date, str(year), method, notes))
     conn.commit()
     conn.close()
-
 
 def get_dues_by_member(member_id, year=None):
     """
@@ -555,8 +552,6 @@ def get_dues_report(member_id=None, year=None, month=None):
     conn.close()
     return rows
 
-
-
 def update_dues_payment(payment_id, amount=None, payment_date=None, method=None, notes=None, year=None):
     conn = get_connection()
     c = conn.cursor()
@@ -591,7 +586,6 @@ def add_work_hours(member_id, date, hours, activity=None, notes=None):
     conn.commit()
     conn.close()
 
-
 def get_work_hours_by_member(member_id, year=None):
     """
     Fetch work hours for a specific member.
@@ -618,7 +612,6 @@ def get_work_hours_by_member(member_id, year=None):
     conn.close()
     return results
 
-
 def get_work_hours_by_id(entry_id):
     conn = get_connection()
     c = conn.cursor()
@@ -628,7 +621,6 @@ def get_work_hours_by_id(entry_id):
     return row
 
 # Database function to fetch work types
-
 def get_work_types():
     conn = get_connection()
     query = "SELECT DISTINCT work_type FROM work_hours"  # Assuming work_type is the field name
@@ -651,7 +643,6 @@ def update_work_hours(entry_id, date=None, activity=None, hours=None, notes=None
     c.execute(f"UPDATE work_hours SET {', '.join(updates)} WHERE id=?", params)
     conn.commit()
     conn.close()
-
 
 def delete_work_hours(entry_id):
     conn = get_connection()
@@ -763,6 +754,7 @@ def get_attendance_summary(year=None, month=None):
     rows = c.fetchall()
     conn.close()
     return rows
+
 def get_member_attendance_status_all_months(member_id, year):
     """
     Returns a list of all status entries for the given member in the specified year.
@@ -779,7 +771,6 @@ def get_member_attendance_status_all_months(member_id, year):
         cur.execute(query, (member_id, str(year)))
         rows = cur.fetchall()
         return [row[0] for row in rows] if rows else ["No records"]
-
 
 def get_member_attendance_status_by_month(member_id, year, month_name):
     """
@@ -883,7 +874,6 @@ def get_member_status_for_month(member_id, year, month):
     finally:
         conn.close()
 
-
 def update_meeting_attendance(entry_id, meeting_date=None, status=None, notes=None):
     conn = get_connection()
     c = conn.cursor()
@@ -903,7 +893,6 @@ def delete_meeting_attendance(entry_id):
     c.execute("DELETE FROM meeting_attendance WHERE id=?", (entry_id,))
     conn.commit()
     conn.close()
-
 
 # Using the standardized get_connection() in your report function
 def get_work_hours_report(member_id=None, start_date=None, end_date=None, work_type=None):
@@ -951,6 +940,7 @@ def get_work_hours_report(member_id=None, start_date=None, end_date=None, work_t
     rows = c.fetchall()
     conn.close()
     return rows
+
 def get_member_work_hours_for_year(member_id, year):
     """
     Return the total hours a member has logged in the given year.
@@ -966,7 +956,6 @@ def get_member_work_hours_for_year(member_id, year):
     total = cur.fetchone()[0]
     conn.close()
     return total
-
 
 def get_member_work_hours_for_month(member_id, year, month):
     """
@@ -985,12 +974,6 @@ def get_member_work_hours_for_month(member_id, year, month):
     total = cur.fetchone()[0]
     conn.close()
     return total
-
-
-
-
-def get_conn():
-    return sqlite3.connect(DB_NAME)
 
 # --- Helper: fetch a single member row (must be in recycle bin = deleted=1) ---
 def _fetch_deleted_member(member_id, conn):
@@ -1131,7 +1114,6 @@ def permanently_delete_member_by_id(member_id):
         except Exception:
             pass
 
-
 def get_waiver_report():
     conn = get_connection()
     conn.row_factory = sqlite3.Row
@@ -1196,6 +1178,7 @@ def get_member_role(member_id):
         return None
     
     # Fetch the committees for a member
+
 def get_member_committees(member_id):
     """
     Fetch a member's committee memberships as a dict.
@@ -1221,7 +1204,6 @@ def get_member_committees(member_id):
         # Return empty dict with all columns if member has no record
         return {col: "" for col in committee_columns}
 
-
 def update_member_basic(member_id, first_name, last_name, dob):
     conn = get_connection()
     cursor = conn.cursor()
@@ -1232,7 +1214,6 @@ def update_member_basic(member_id, first_name, last_name, dob):
     """, (first_name, last_name, dob, member_id))
     conn.commit()
     conn.close()
-
 
 def update_member_contact(member_id, email, email2, phone, phone2, address, city, state, zip):
     conn = get_connection()
@@ -1245,9 +1226,7 @@ def update_member_contact(member_id, email, email2, phone, phone2, address, city
     conn.commit()
     conn.close()
 
-
 # ------------------ Committees DB Functions ------------------
-
 def update_member_committees(member_id, committees_dict):
     """Insert or update a member's committees and notes in the committees table."""
     conn = get_connection()
@@ -1269,7 +1248,6 @@ def update_member_committees(member_id, committees_dict):
     conn.commit()
     cursor.close()
 
-
 def get_all_committees():
     """Return all committee column names from committees table (excluding id/member_id/notes)."""
     conn = get_connection()
@@ -1279,7 +1257,6 @@ def get_all_committees():
     cur.close()
     conn.close()
     return [c for c in columns if c not in ("id", "member_id", "notes")]
-
 
 def get_committee_names():
     """Return cleaned-up committee names for display (excluding id/member_id/notes)."""
@@ -1291,7 +1268,6 @@ def get_committee_names():
     conn.close()
     exclude = {"id", "member_id", "notes"}
     return [c.replace("_", " ").title() for c in columns if c not in exclude]
-
 
 def get_members_by_committee(committee_name):
     """
@@ -1318,7 +1294,6 @@ def get_members_by_committee(committee_name):
     conn.close()
     return rows
 
-
 def get_member_committees(member_id):
     """Return a dictionary of all committee flags + notes for a member."""
     conn = get_connection()
@@ -1330,13 +1305,38 @@ def get_member_committees(member_id):
     conn.close()
     return dict(row) if row else {}
 
-# in database.py
 def get_executive_committee_members():
-    # Example: return a list of dicts
-    return [
-        {"badge_number": 101, "first_name": "Alice", "last_name": "Smith",
-         "roles": "President", "terms": "2023-2025", "notes": "N/A"},
-        {"badge_number": 102, "first_name": "Bob", "last_name": "Jones",
-         "roles": "Vice President", "terms": "2023-2025", "notes": "N/A"},
-        # etc.
-    ]
+    conn = sqlite3.connect("members.db")
+    cursor = conn.cursor()
+
+    # Select only executive positions (adjust the list of positions as needed)
+    exec_positions = ("President", "Vice President", "Secretary", "Treasurer")
+
+    # Prepare placeholders for the SQL IN clause
+    placeholders = ",".join("?" for _ in exec_positions)
+
+    query = f"""
+        SELECT m.badge_number, m.first_name, m.last_name,
+               r.position, r.term_start, r.term_end
+        FROM roles r
+        JOIN members m ON r.member_id = m.id
+        WHERE r.position IN ({placeholders})
+        ORDER BY r.term_start DESC
+    """
+
+    cursor.execute(query, exec_positions)
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Convert to list of dicts
+    exec_members = []
+    for row in rows:
+        exec_members.append({
+            "badge_number": row[0],
+            "first_name": row[1],
+            "last_name": row[2],
+            "roles": row[3],
+            "terms": f"{row[4]} until {row[5]}"
+        })
+
+    return exec_members

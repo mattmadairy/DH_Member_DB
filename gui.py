@@ -7,8 +7,8 @@ from datetime import datetime
 import csv
 import calendar
 #import pyperclip
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+#from reportlab.lib.pagesizes import letter
+#from reportlab.pdfgen import canvas
 
 
 DATE_FMT = "%m/%d/%Y"
@@ -2308,7 +2308,7 @@ class ReportsWindow(tk.Toplevel):
 
         # ---------------- Attendance Tab ---------------- #
         attendance_tab = ttk.Frame(self.notebook)
-        self.notebook.add(attendance_tab, text="Attendance")
+        self.notebook.add(attendance_tab, text="Meeting Attendance")
         AttendanceReport(attendance_tab, member_id).pack(fill="both", expand=True)
 
         # ---------------- Waiver Tab ---------------- #
@@ -2334,7 +2334,6 @@ class ReportsWindow(tk.Toplevel):
         self.notebook.bind("<Configure>", resize_tabs)
         
     
-
 # ---------------- BaseReport ---------------- #
 class BaseReport(tk.Frame):
     """Base class for all reports. Subclasses must define columns and _create_tree()."""
@@ -2581,10 +2580,47 @@ class DuesReport(BaseReport):
         hsb.grid(row=1, column=0, sticky="ew")
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
+
+        # Which columns should be centered?
+        center_cols = {"badge", "year", "last_payment_date", "method"}
+
         for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_", " ").title())
-            anchor = "center" if col == "badge" else "e" if col in ("amount_due","balance_due","amount_paid","year") else "w"
+            self.tree.heading(col, text=col.replace("_", " ").title(),
+                              command=lambda c=col: self._sort_column(c, False))
+            if col in center_cols:
+                anchor = "center"
+            elif col in ("amount_due", "balance_due", "amount_paid"):
+                anchor = "e"
+            else:
+                anchor = "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def _sort_column(self, col, reverse):
+            """Sort treeview column and show arrow."""
+            data = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+            # Numeric sort if possible
+            try:
+                data = [(float(v), k) for v, k in data]
+            except ValueError:
+                pass
+
+            data.sort(reverse=reverse)
+            for idx, (_, k) in enumerate(data):
+                self.tree.move(k, "", idx)
+
+            # Update all headings to add arrow to sorted column
+            for c in self.columns:
+                header_text = c.replace("_", " ").title()
+                if c == "badge":
+                    header_text = "Badge"
+                if c == col:
+                    arrow = " ▲" if not reverse else " ▼"
+                    self.tree.heading(c, text=header_text + arrow,
+                                    command=lambda c=c: self._sort_column(c, not reverse))
+                else:
+                    self.tree.heading(c, text=header_text,
+                                    command=lambda c=c: self._sort_column(c, False))
+
 
     def populate_report(self):
         self.tree.delete(*self.tree.get_children())
@@ -2601,24 +2637,29 @@ class DuesReport(BaseReport):
             except:
                 pass
             dues = database.get_dues_by_member(m[0])
-            total_paid,last_payment_date,method = 0,"",""
+            total_paid, last_payment_date, method = 0, "", ""
             for d in dues:
-                try: amt=float(d[4])
-                except: amt=0
-                pay_year = int(d[3]) if len(d)>3 else year
-                if pay_year != year: continue
+                try:
+                    amt = float(d[4])
+                except:
+                    amt = 0
+                pay_year = int(d[3]) if len(d) > 3 else year
+                if pay_year != year:
+                    continue
                 total_paid += amt
-                date = d[2] if len(d)>2 else ""
-                if date and (not last_payment_date or date>last_payment_date):
+                date = d[2] if len(d) > 2 else ""
+                if date and (not last_payment_date or date > last_payment_date):
                     last_payment_date = date
-                    method = d[5] if len(d)>5 else ""
+                    method = d[5] if len(d) > 5 else ""
             if last_payment_date:
-                try: last_payment_date = datetime.strptime(last_payment_date,"%Y-%m-%d").strftime("%m-%d-%Y")
-                except: pass
-            balance_due = max(amount_due-total_paid,0)
-            self.tree.insert("", "end", values=(badge,name,membership_type,
-                                                f"{amount_due:.2f}",f"{balance_due:.2f}",
-                                                year,last_payment_date,f"{total_paid:.2f}",method))
+                try:
+                    last_payment_date = datetime.strptime(last_payment_date, "%Y-%m-%d").strftime("%m-%d-%Y")
+                except:
+                    pass
+            balance_due = max(amount_due - total_paid, 0)
+            self.tree.insert("", "end", values=(badge, name, membership_type,
+                                                f"{amount_due:.2f}", f"{balance_due:.2f}",
+                                                year, last_payment_date, f"{total_paid:.2f}", method))
 
     def print_report(self):
         """Print preview of dues report."""
@@ -2636,6 +2677,8 @@ class DuesReport(BaseReport):
         rows = [self.tree.item(item, "values") for item in items]
         page_width = 100  # wider for financial data
         num_cols = len(self.columns)
+
+        # Widths
         raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
         raw_widths = [max(raw_widths[i], len(self.columns[i])) for i in range(num_cols)]
         total_raw = sum(raw_widths)
@@ -2644,19 +2687,39 @@ class DuesReport(BaseReport):
         if diff != 0:
             col_widths[-1] += diff
 
-        def format_row(values):
-            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+        center_cols = {"badge", "year", "last_payment_date", "method"}
+        right_cols = {"amount_due", "balance_due", "amount_paid"}
 
+        def format_row(values):
+            out = []
+            for v, w, col in zip(values, col_widths, self.columns):
+                v = str(v)
+                if col in center_cols:
+                    out.append(v.center(w))
+                elif col in right_cols:
+                    out.append(v.rjust(w))
+                else:
+                    out.append(v.ljust(w))
+            return " ".join(out)
+
+        # Paging
         lines_per_page = 35
         pages, current_lines = [], []
 
         def add_header():
             total_width = page_width
             current_lines.append(org_name.center(total_width))
-            current_lines.append(report_name.center(total_width))
+            
+            # Split title and timeframe
+            report_title = "Dues Report"
+            timeframe = f"Year: {self.year_var.get()}"
+            
+            current_lines.append(report_title.center(total_width))
+            current_lines.append(timeframe.center(total_width))  # new line for timeframe
             current_lines.append("=" * total_width)
-            current_lines.append(format_row([c.replace("_"," ").title() for c in self.columns]))
+            current_lines.append(format_row([c.replace("_", " ").title() for c in self.columns]))
             current_lines.append("-" * total_width)
+
 
         add_header()
         row_count = 0
@@ -2682,27 +2745,6 @@ class DuesReport(BaseReport):
             page_lines.append("End of Report".center(page_width))
 
         full_text = "\n\n".join("\n".join(p) for p in pages)
-
-        # PDF generation helper
-        def generate_pdf(path, full_text):
-            c = canvas.Canvas(path, pagesize=letter)
-            c.setFont("Courier", 10)
-            width, height = letter
-            margin = 50
-            usable_width = width - 2 * margin
-            char_width = c.stringWidth("M", "Courier", 10)
-            max_chars = int(usable_width // char_width)
-            y = height - margin
-            line_height = 12
-            for line in full_text.split("\n"):
-                padded = line.ljust(max_chars)
-                c.drawString(margin, y, padded)
-                y -= line_height
-                if y < margin:
-                    c.showPage()
-                    c.setFont("Courier", 10)
-                    y = height - margin
-            c.save()
 
         # --- Print Preview Window ---
         print_window = tk.Toplevel(self)
@@ -2748,11 +2790,12 @@ class DuesReport(BaseReport):
         tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
+
 # ---------------- WorkHoursReport ---------------- #
 class Work_HoursReport(BaseReport):
     def __init__(self, parent, member_id=None):
-        self.columns = ("badge","name","work_hours")
-        self.column_widths = (80,260,120)
+        self.columns = ("badge", "name", "work_hours")
+        self.column_widths = (80, 260, 120)
         super().__init__(parent, member_id)
         self._create_tree()
         self.populate_report()
@@ -2769,29 +2812,59 @@ class Work_HoursReport(BaseReport):
         hsb.grid(row=1, column=0, sticky="ew")
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
+
         for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_"," ").title())
-            anchor = "center" if col in ("work_hours","badge") else "w"
+            self.tree.heading(
+                col,
+                text=col.replace("_", " ").title(),
+                command=lambda c=col: self._sort_column(c, False)  # sortable
+            )
+            anchor = "center" if col in ("work_hours", "badge") else "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def _sort_column(self, col, reverse):
+            """Sort treeview data by column and add arrow to sorted column."""
+            data = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+            try:
+                data.sort(key=lambda t: float(t[0]) if t[0] != "" else 0, reverse=reverse)
+            except ValueError:
+                data.sort(key=lambda t: t[0], reverse=reverse)
+
+            for index, (_, k) in enumerate(data):
+                self.tree.move(k, "", index)
+
+            # Update headings to show arrow only on the sorted column
+            for c in self.columns:
+                header_text = c.replace("_", " ").title()
+                if c == "badge":
+                    header_text = "Badge"
+                if c == col:
+                    arrow = " ▲" if not reverse else " ▼"
+                    self.tree.heading(c, text=header_text + arrow,
+                                    command=lambda c=c: self._sort_column(c, not reverse))
+                else:
+                    self.tree.heading(c, text=header_text,
+                                    command=lambda c=c: self._sort_column(c, False))
+
 
     def populate_report(self):
         self.tree.delete(*self.tree.get_children())
         year = self.year_var.get()
         month_name = self.month_var.get()
-        if month_name=="All":
+        if month_name == "All":
             start, end = f"{year}-01-01", f"{year}-12-31"
         else:
             month_idx = list(calendar.month_name).index(month_name)
             start = f"{year}-{month_idx:02d}-01"
             last_day = calendar.monthrange(year, month_idx)[1]
             end = f"{year}-{month_idx:02d}-{last_day}"
-        rows = database.get_work_hours_report(self.member_id,start,end)
-        for badge,first,last,total_hours in rows:
+        rows = database.get_work_hours_report(self.member_id, start, end)
+        for badge, first, last, total_hours in rows:
             name = f"{last}, {first}"
-            self.tree.insert("", "end", values=(badge or "",name,total_hours or 0))
+            self.tree.insert("", "end", values=(badge or "", name, total_hours or 0))
 
     def print_report(self):
-        """Print preview of work hours report with dynamic month/year header."""
+        """Print preview of work hours report with timeframe under report name."""
         if self.tree is None:
             return
         items = self.tree.get_children()
@@ -2800,10 +2873,12 @@ class Work_HoursReport(BaseReport):
             return
 
         org_name = "Dug Hill Rod & Gun Club"
+        report_name = "Work Hours Report"
+        # new timeframe line
         if self.month_var.get() == "All":
-            report_name = f"Work Hours Report - Yearly {self.year_var.get()}"
+            timeframe = f"Year: {self.year_var.get()}"
         else:
-            report_name = f"Work Hours Report - {self.month_var.get()} {self.year_var.get()}"
+            timeframe = f"{self.month_var.get()} {self.year_var.get()}"
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
 
         rows = [self.tree.item(item, "values") for item in items]
@@ -2818,7 +2893,15 @@ class Work_HoursReport(BaseReport):
             col_widths[-1] += diff
 
         def format_row(values):
-            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+            formatted = []
+            for v, w, col in zip(values, col_widths, self.columns):
+                v = str(v)
+                # center badge column
+                if col == "badge":
+                    formatted.append(v.center(w))
+                else:
+                    formatted.append(v.ljust(w))
+            return " ".join(formatted)
 
         lines_per_page = 40
         pages, current_lines = [], []
@@ -2827,8 +2910,9 @@ class Work_HoursReport(BaseReport):
             total_width = page_width
             current_lines.append(org_name.center(total_width))
             current_lines.append(report_name.center(total_width))
+            current_lines.append(timeframe.center(total_width))  # new timeframe line
             current_lines.append("=" * total_width)
-            current_lines.append(format_row([c.replace("_"," ").title() for c in self.columns]))
+            current_lines.append(format_row([c.replace("_", " ").title() for c in self.columns]))
             current_lines.append("-" * total_width)
 
         add_header()
@@ -2856,196 +2940,7 @@ class Work_HoursReport(BaseReport):
 
         full_text = "\n\n".join("\n".join(p) for p in pages)
 
-        # PDF generation helper
-        def generate_pdf(path, full_text):
-            c = canvas.Canvas(path, pagesize=letter)
-            c.setFont("Courier", 10)
-            width, height = letter
-            margin = 50
-            usable_width = width - 2 * margin
-            char_width = c.stringWidth("M", "Courier", 10)
-            max_chars = int(usable_width // char_width)
-            y = height - margin
-            line_height = 12
-            for line in full_text.split("\n"):
-                padded = line.ljust(max_chars)
-                c.drawString(margin, y, padded)
-                y -= line_height
-                if y < margin:
-                    c.showPage()
-                    c.setFont("Courier", 10)
-                    y = height - margin
-            c.save()
-
-        # --- Print Preview Window ---
-        print_window = tk.Toplevel(self)
-        print_window.title(f"{report_name} - Print Preview")
-        center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
-        frame = tk.Frame(print_window)
-        frame.pack(fill="both", expand=True)
-
-        text = tk.Text(frame, wrap="none", font=("Courier", 10))
-        text.insert("1.0", full_text)
-        text.config(state="disabled")
-        text.grid(row=0, column=0, sticky="nsew")
-
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
-        hsb.grid(row=1, column=0, sticky="ew")
-
-        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        frame.rowconfigure(0, weight=1)
-        frame.columnconfigure(0, weight=1)
-
-        # --- Buttons ---
-        btn_frame = tk.Frame(print_window)
-        btn_frame.pack(fill="x", pady=5)
-
-        def save_as_pdf():
-            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
-            if path:
-                generate_pdf(path, full_text)
-                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
-
-        def print_to_pdf():
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            generate_pdf(tmp.name, full_text)
-            webbrowser.open_new(tmp.name)
-
-        def export_csv():
-            self.export_csv()
-
-        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
-
-# ---------------- AttendanceReport ---------------- #
-class AttendanceReport(BaseReport):
-    def __init__(self, parent, member_id=None):
-        self.columns = ("badge", "name", "status")
-        self.column_widths = (90, 260, 120)
-        super().__init__(parent, member_id)
-        self._create_tree()
-        self.populate_report()
-
-    def _create_tree(self):
-        frame = tk.Frame(self)
-        frame.pack(fill="both", expand=True, pady=5)
-        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
-        for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_", " ").title())
-            anchor = "center" if col in ("status", "badge") else "w"
-            self.tree.column(col, width=width, anchor=anchor, stretch=True)
-
-    def populate_report(self):
-        self.tree.delete(*self.tree.get_children())
-        year = self.year_var.get()
-        month_name = self.month_var.get()
-        members = database.get_all_members()
-        for m in members:
-            badge = m[1]
-            name = f"{m[3]} {m[4]}"
-            if month_name == "All":
-                total = database.count_member_attendance(m[0], year)
-            else:
-                month_idx = list(calendar.month_name).index(month_name)
-                total = database.get_member_status_for_month(m[0], year, month_idx)
-            self.tree.insert("", "end", values=(badge, name, total))
-
-    def print_report(self):
-        """Print preview of attendance report with month/year in header."""
-        if self.tree is None:
-            return
-        items = self.tree.get_children()
-        if not items:
-            messagebox.showinfo("Print Report", "No data to print.")
-            return
-
-        org_name = "Dug Hill Rod & Gun Club"
-        report_name = "Attendance Report"
-        month_name = self.month_var.get()
-        month_display = month_name if month_name != "All" else "Yearly"
-        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-
-        # Gather rows from the tree
-        rows = [self.tree.item(item, "values") for item in items]
-        headers = [c.replace("_", " ").title() for c in self.columns]
-
-        page_width = 85
-        num_cols = len(self.columns)
-
-        # Compute column widths
-        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
-        raw_widths = [max(raw_widths[i], len(headers[i])) for i in range(num_cols)]
-        total_raw = sum(raw_widths)
-        col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
-        diff = page_width - sum(col_widths)
-        if diff != 0:
-            col_widths[-1] += diff
-
-        def format_row(values):
-            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
-
-        lines_per_page = 40
-        pages, current_lines = [], []
-
-        # Header function
-        def add_header():
-            total_width = page_width
-            current_lines.append(org_name.center(total_width))
-            current_lines.append(report_name.center(total_width))
-
-            # Show month only if not yearly
-            month_name = self.month_var.get()
-            year_display = str(self.year_var.get())
-            if month_name != "All":
-                current_lines.append(f"Month: {month_name}    Year: {year_display}".center(total_width))
-            else:
-                current_lines.append(f"Year: {year_display}".center(total_width))
-
-            current_lines.append("=" * total_width)
-            current_lines.append(format_row(headers))
-            current_lines.append("-" * total_width)
-
-
-        add_header()
-        row_count = 0
-        for row in rows:
-            row_vals = list(row)
-            if self.exclude_names_var.get() and len(row_vals) > 1:
-                row_vals[1] = "*****"
-            current_lines.append(format_row(row_vals))
-            row_count += 1
-            if row_count >= lines_per_page - 6:
-                pages.append(current_lines)
-                current_lines = []
-                row_count = 0
-                add_header()
-        if current_lines:
-            pages.append(current_lines)
-
-        total_pages = len(pages)
-        for i, page_lines in enumerate(pages, start=1):
-            page_lines.append("=" * page_width)
-            page_lines.append(f"Generated: {generation_dt}".center(page_width))
-            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
-            page_lines.append("End of Report".center(page_width))
-
-        full_text = "\n\n".join("\n".join(p) for p in pages)
-
-        # PDF generation, preview, buttons remain the same as your previous print_report
-
-
+        # PDF helper
         def generate_pdf(path, full_text):
             c = canvas.Canvas(path, pagesize=letter)
             c.setFont("Courier", 10)
@@ -3083,10 +2978,249 @@ class AttendanceReport(BaseReport):
         hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
         hsb.grid(row=1, column=0, sticky="ew")
         text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
         # --- Buttons ---
+        btn_frame = tk.Frame(print_window)
+        btn_frame.pack(fill="x", pady=5)
+
+        def save_as_pdf():
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+            if path:
+                generate_pdf(path, full_text)
+                messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
+
+        def print_to_pdf():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            generate_pdf(tmp.name, full_text)
+            webbrowser.open_new(tmp.name)
+
+        def export_csv():
+            self.export_csv()
+
+        tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
+
+
+# ---------------- AttendanceReport ---------------- #
+
+class AttendanceReport(BaseReport):
+    def __init__(self, parent, member_id=None):
+        self.columns = ("badge", "name", "status")
+        self.column_widths = (80, 260, 120)
+        self.sort_states = {}  # Track column sort states
+        super().__init__(parent, member_id)
+        self._create_tree()
+        self.populate_report()
+
+    def _create_tree(self):
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True, pady=5)
+        self.tree = ttk.Treeview(frame, columns=self.columns, show="headings")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        for col, width in zip(self.columns, self.column_widths):
+            header_text = "Badge" if col == "badge" else col.replace("_", " ").title()
+            self.tree.heading(col, text=header_text,
+                              command=lambda c=col: self.sort_by_column(c))
+            anchor = "center" if col in ("status", "badge") else "w"
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def sort_by_column(self, col):
+        """Sort treeview contents and show arrow on the sorted column."""
+        items = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+        # Detect numeric vs text sort
+        try:
+            items = [(float(v), k) for v, k in items]
+        except ValueError:
+            pass
+
+        reverse = self.sort_states.get(col, False)
+        self.sort_states[col] = not reverse
+        items.sort(reverse=reverse)
+
+        for index, (val, k) in enumerate(items):
+            self.tree.move(k, "", index)
+
+        # Update headings with arrow
+        for c in self.columns:
+            base = "Badge" if c == "badge" else c.replace("_", " ").title()
+            if c == col:
+                arrow = " ▲" if not reverse else " ▼"
+                self.tree.heading(c, text=base + arrow,
+                                  command=lambda c=c: self.sort_by_column(c))
+            else:
+                self.tree.heading(c, text=base, command=lambda c=c: self.sort_by_column(c))
+
+    # ... keep populate_report() and print_report() as-is ...
+
+
+    def populate_report(self):
+        self.tree.delete(*self.tree.get_children())
+        year = self.year_var.get()
+        month_name = self.month_var.get()
+
+        # Change column header based on report type
+        if month_name == "All":
+            self.tree.heading("status", text="Number of Meetings", command=lambda: self.sort_by_column("status"))
+        else:
+            self.tree.heading("status", text="Status", command=lambda: self.sort_by_column("status"))
+
+        members = database.get_all_members()
+        for m in members:
+            badge = m[1]
+            name = f"{m[3]} {m[4]}"
+
+            if month_name == "All":
+                total = database.count_member_attendance(m[0], year)
+                self.tree.insert("", "end", values=(badge, name, total))
+            else:
+                month_idx = list(calendar.month_name).index(month_name)
+                status = database.get_member_status_for_month(m[0], year, month_idx)
+
+                if status not in ("Attended", "Exempt", "Exemption Granted"):
+                    continue  # Skip irrelevant statuses
+
+                self.tree.insert("", "end", values=(badge, name, status))
+
+    def print_report(self):
+        """Print preview of attendance report with month/year in header."""
+        if self.tree is None:
+            return
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("Print Report", "No data to print.")
+            return
+
+        org_name = "Dug Hill Rod & Gun Club"
+        report_name = "Meeting Attendance Report"
+        month_name = self.month_var.get()
+        month_display = month_name if month_name != "All" else "Yearly"
+        generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+
+        # Gather rows
+        rows = [self.tree.item(item, "values") for item in items]
+        headers = [self.tree.heading(c)["text"] for c in self.columns]
+
+        page_width = 85
+        num_cols = len(self.columns)
+
+        raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
+        raw_widths = [max(raw_widths[i], len(headers[i])) for i in range(num_cols)]
+        total_raw = sum(raw_widths)
+        col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
+        diff = page_width - sum(col_widths)
+        if diff != 0:
+            col_widths[-1] += diff
+
+        def format_row(values):
+            formatted = []
+            for (v, w, col) in zip(values, col_widths, self.columns):
+                # Center badge always
+                if col == "badge":
+                    formatted.append(str(v).center(w))
+                # Center status if it's a yearly report
+                elif col == "status" and self.month_var.get() == "All":
+                    formatted.append(str(v).center(w))
+                else:
+                    formatted.append(str(v).ljust(w))
+            return " ".join(formatted)
+
+
+        lines_per_page = 40
+        pages, current_lines = [], []
+
+        def add_header():
+            total_width = page_width
+            current_lines.append(org_name.center(total_width))
+            current_lines.append(report_name.center(total_width))
+            year_display = str(self.year_var.get())
+            if month_name != "All":
+                current_lines.append(f"Month: {month_name}    Year: {year_display}".center(total_width))
+            else:
+                current_lines.append(f"Year: {year_display}".center(total_width))
+            current_lines.append("=" * total_width)
+            current_lines.append(format_row(headers))
+            current_lines.append("-" * total_width)
+
+        add_header()
+        row_count = 0
+        for row in rows:
+            row_vals = list(row)
+            if self.exclude_names_var.get() and len(row_vals) > 1:
+                row_vals[1] = "*****"
+            current_lines.append(format_row(row_vals))
+            row_count += 1
+            if row_count >= lines_per_page - 6:
+                pages.append(current_lines)
+                current_lines = []
+                row_count = 0
+                add_header()
+        if current_lines:
+            pages.append(current_lines)
+
+        total_pages = len(pages)
+        for i, page_lines in enumerate(pages, start=1):
+            page_lines.append("=" * page_width)
+            page_lines.append(f"Generated: {generation_dt}".center(page_width))
+            page_lines.append(f"Page {i} of {total_pages}".center(page_width))
+            page_lines.append("End of Report".center(page_width))
+
+        full_text = "\n\n".join("\n".join(p) for p in pages)
+
+        # PDF generator
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
+
+        # Print Preview Window
+        print_window = tk.Toplevel(self)
+        print_window.title(f"{report_name} - Print Preview")
+        center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        frame = tk.Frame(print_window)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="none", font=("Courier", 10))
+        text.insert("1.0", full_text)
+        text.config(state="disabled")
+        text.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+        text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # Buttons
         btn_frame = tk.Frame(print_window)
         btn_frame.pack(fill="x", pady=5)
 
@@ -3132,10 +3266,44 @@ class WaiverReport(BaseReport):
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
+        # Track sort order per column
+        self._sort_orders = {col: False for col in self.columns}
+
         for col, width in zip(self.columns, self.column_widths):
-            self.tree.heading(col, text=col.replace("_", " ").title())
+            self.tree.heading(col, text=col.replace("_", " ").title(),
+                            command=lambda c=col: self._sort_by(c))
             anchor = "center" if col == "badge" else "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
+
+    def _sort_by(self, col):
+        """Sort treeview by given column and display arrow for sort direction."""
+        data = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+
+        # Determine sort type
+        try:
+            data = [(float(d[0]), d[1]) for d in data]
+        except ValueError:
+            data = [(d[0].lower(), d[1]) for d in data]
+
+        # Toggle sort order
+        reverse = self._sort_orders.get(col, False)
+        data.sort(reverse=reverse)
+        self._sort_orders[col] = not reverse
+
+        # Rearrange items in the tree
+        for index, (_, k) in enumerate(data):
+            self.tree.move(k, "", index)
+
+        # Update column headers to show arrows
+        for c in self.tree["columns"]:
+            base = c.replace("_", " ").title()
+            if c == col:
+                arrow = " ▲" if not reverse else " ▼"
+                self.tree.heading(c, text=base + arrow, command=lambda c=c: self._sort_by(c))
+            else:
+                self.tree.heading(c, text=base, command=lambda c=c: self._sort_by(c))
+
+
 
     def populate_report(self):
         self.tree.delete(*self.tree.get_children())
@@ -3176,7 +3344,14 @@ class WaiverReport(BaseReport):
             col_widths[-1] += diff
 
         def format_row(values):
-            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+            formatted = []
+            for v, w, col in zip(values, col_widths, self.columns):
+                if col == "badge":
+                    formatted.append(str(v).center(w))  # center badge
+                else:
+                    formatted.append(str(v).ljust(w))
+            return " ".join(formatted)
+
 
         lines_per_page = 40
         pages, current_lines = [], []
@@ -3282,24 +3457,18 @@ class WaiverReport(BaseReport):
 # ---------------- CommitteesReport ---------------- #
 class CommitteesReport(BaseReport):
     def __init__(self, parent, member_id=None):
-        # default columns for regular committees
         self.columns = ("badge_number", "name", "notes")
         self.column_widths = (80, 250, 300)
         super().__init__(parent, member_id, include_month=False)
 
-        # Add Committee combobox at top
         self._setup_committee_filter()
-
-        # Create initial tree
         self._create_tree()
         self.populate_report()
 
     def _setup_committee_filter(self):
-        """Add Committee combobox above the base controls."""
         bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
         tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5, 2))
 
-        # Include Executive Committee as an option
         raw_committees = database.get_committee_names()
         committees = sorted([c for c in raw_committees if c.lower() != "committee id"])
         committees.append("Executive Committee")
@@ -3309,11 +3478,10 @@ class CommitteesReport(BaseReport):
         cb.bind("<<ComboboxSelected>>", lambda e: self._on_committee_change())
 
     def _on_committee_change(self):
-        """Recreate the tree if the committee selection changes."""
         selected = self.committee_var.get()
         if selected == "Executive Committee":
-            self.columns = ("badge_number", "name", "roles", "terms", "notes")
-            self.column_widths = (80, 200, 150, 100, 250)
+            self.columns = ("badge_number", "name", "role", "term")  # notes removed
+            self.column_widths = (80, 200, 150, 100)
         else:
             self.columns = ("badge_number", "name", "notes")
             self.column_widths = (80, 250, 300)
@@ -3323,8 +3491,8 @@ class CommitteesReport(BaseReport):
         self._create_tree()
         self.populate_report()
 
+
     def _create_tree(self):
-        """Create treeview inside its own frame."""
         self.tree_frame = tk.Frame(self)
         self.tree_frame.pack(fill="both", expand=True, pady=5)
 
@@ -3340,12 +3508,40 @@ class CommitteesReport(BaseReport):
 
         for col, width in zip(self.columns, self.column_widths):
             header_text = "Badge" if col == "badge_number" else col.replace("_", " ").title()
-            self.tree.heading(col, text=header_text)
-            anchor = "center" if col in ("badge_number", "roles", "terms") else "w"
+            self.tree.heading(col, text=header_text, command=lambda c=col: self._sort_tree(c, False))
+            if col == "role":
+                anchor = "w"
+            elif col == "badge_number":
+                anchor = "center"
+            else:
+                anchor = "w"
             self.tree.column(col, width=width, anchor=anchor, stretch=True)
 
+    def _sort_tree(self, col, reverse):
+        # Gather the data
+        data_list = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+        try:
+            data_list.sort(key=lambda t: float(t[0]), reverse=reverse)
+        except ValueError:
+            data_list.sort(key=lambda t: t[0].lower() if isinstance(t[0], str) else t[0], reverse=reverse)
+        
+        # Reorder the items
+        for index, (val, k) in enumerate(data_list):
+            self.tree.move(k, "", index)
+
+        # Update headers to show arrow only on the sorted column
+        for c in self.columns:
+            header_text = "Badge" if c == "badge_number" else c.replace("_", " ").title()
+            if c == col:
+                arrow = " ▲" if not reverse else " ▼"
+                self.tree.heading(c, text=header_text + arrow,
+                                command=lambda c=c: self._sort_tree(c, not reverse))
+            else:
+                self.tree.heading(c, text=header_text,
+                                command=lambda c=c: self._sort_tree(c, False))
+
+
     def populate_report(self):
-        """Fill treeview with members of selected committee or executive committee."""
         if self.tree is None:
             return
         self.tree.delete(*self.tree.get_children())
@@ -3359,10 +3555,10 @@ class CommitteesReport(BaseReport):
             for row in rows:
                 badge = row.get("badge_number", "")
                 name = f"{row.get('first_name','')} {row.get('last_name','')}".strip()
-                roles = row.get("roles", "")
-                terms = row.get("terms", "")
-                notes = row.get("notes", "")
-                self.tree.insert("", "end", values=(badge, name, roles, terms, notes))
+                role = row.get("roles", "")
+                term = row.get("terms", "")
+                notes = row.get("notes") or ""  # leave blank if no notes
+                self.tree.insert("", "end", values=(badge, name, role, term, notes))
         else:
             rows = database.get_members_by_committee(selected_committee)
             for row in rows:
@@ -3372,7 +3568,6 @@ class CommitteesReport(BaseReport):
                 self.tree.insert("", "end", values=(badge_number, name, notes))
 
     def print_report(self):
-        """Print preview of the committee/executive committee report."""
         if self.tree is None:
             return
         items = self.tree.get_children()
@@ -3381,49 +3576,46 @@ class CommitteesReport(BaseReport):
             return
 
         org_name = "Dug Hill Rod & Gun Club"
-        report_name = f"{self.committee_var.get()} Roster"
+        report_name = "Committee: " + self.committee_var.get() + " Roster"
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
 
-        # Format column headers nicely
-        headers = [c.replace("_", " ").title() for c in self.columns]
-
-
-        # Gather rows from the tree
+        headers = [("Badge" if c == "badge_number" else c.replace("_", " ").title()) for c in self.columns]
         rows = [self.tree.item(item, "values") for item in items]
 
-
-        # Determine page width (characters) and scale columns
         page_width = 85
         num_cols = len(self.columns)
-
-        # Get max content width per column
         raw_widths = [max(len(str(row[idx])) for row in rows) if rows else 5 for idx in range(num_cols)]
-        # Include headers
-        raw_widths = [max(raw_widths[i], len(self.columns[i])) for i in range(num_cols)]
-
+        raw_widths = [max(raw_widths[i], len(headers[i])) for i in range(num_cols)]
         total_raw = sum(raw_widths)
         col_widths = [max(3, int(w / total_raw * page_width)) for w in raw_widths]
-        # Adjust rounding difference
         diff = page_width - sum(col_widths)
         if diff != 0:
             col_widths[-1] += diff
 
         def format_row(values):
-            return " ".join(str(v).ljust(w) for v, w in zip(values, col_widths))
+            formatted = []
+            for i in range(len(col_widths)):
+                v = values[i] if i < len(values) else ""
+                col_name = self.columns[i] if i < len(self.columns) else ""
+                if col_name == "badge_number":
+                    formatted.append(str(v).center(col_widths[i]))
+                elif col_name == "role":
+                    formatted.append(str(v).ljust(col_widths[i]))
+                else:
+                    formatted.append(str(v).ljust(col_widths[i]))
+            return " ".join(formatted)
 
-        # Build report text
+
         lines_per_page = 40
         pages, current_lines = [], []
 
-        # Header
         def add_header():
             total_width = page_width
             current_lines.append(org_name.center(total_width))
             current_lines.append(report_name.center(total_width))
             current_lines.append("=" * total_width)
-            current_lines.append(format_row(headers))  # <-- use formatted headers
+            current_lines.append(format_row(headers))
             current_lines.append("-" * total_width)
-
 
         add_header()
         row_count = 0
@@ -3450,7 +3642,6 @@ class CommitteesReport(BaseReport):
 
         full_text = "\n\n".join("\n".join(p) for p in pages)
 
-        # PDF generation helper
         def generate_pdf(path, full_text):
             c = canvas.Canvas(path, pagesize=letter)
             c.setFont("Courier", 10)
@@ -3471,7 +3662,6 @@ class CommitteesReport(BaseReport):
                     y = height - margin
             c.save()
 
-        # --- Print Preview Window ---
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
@@ -3487,17 +3677,15 @@ class CommitteesReport(BaseReport):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
         hsb.grid(row=1, column=0, sticky="ew")
-
         text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        # --- Buttons ---
         btn_frame = tk.Frame(print_window)
         btn_frame.pack(fill="x", pady=5)
 
         def save_as_pdf():
-            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
             if path:
                 generate_pdf(path, full_text)
                 messagebox.showinfo("Save as PDF", f"PDF saved to {path}")
@@ -3514,7 +3702,6 @@ class CommitteesReport(BaseReport):
         tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
-
 
 
 if __name__ == "__main__":

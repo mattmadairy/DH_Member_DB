@@ -1,6 +1,6 @@
 
-Reports Window - standardize the column widths and justification, header updates
-
+reports window - double click on entry for all reports.
+check focus for all windows
 
 
 import csv for meeting attendance captured from RFID scanner. 
