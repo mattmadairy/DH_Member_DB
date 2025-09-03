@@ -93,7 +93,8 @@ class MemberApp:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="⬆️ Import ", command=self._show_import_dialog)
+        file_menu.add_command(label="⬆️ Import Members", command=self._show_import_dialog)
+        file_menu.add_command(label="📃     Import Meeting Data", command=self._add_meeting_records_from_excel)
         file_menu.add_command(label="⬇️ Export Current Tab", command=self._show_export_dialog)
         file_menu.add_command(label="📧     Export Emails (Mail Merge)", command=self._export_emails_for_mail_merge)
         file_menu.add_separator()
@@ -996,6 +997,9 @@ class MemberApp:
             
     def _show_recycle_bin(self):
         RecycleBinWindow(self.root, refresh_main_fn=self.load_data)
+    
+    def _add_meeting_records_from_excel(self):
+        pass
 
 
 class NewMemberForm:

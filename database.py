@@ -1352,3 +1352,32 @@ def get_member_id_from_badge(badge):
     if row:
         return row[0]
     return None
+
+
+# Get member by card_internal
+def get_member_by_card_internal(card_internal):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM members WHERE card_internal=?", (card_internal,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+# Get attendance for a member on a given date
+def get_meeting_attendance(member_id, meeting_date):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM meeting_attendance WHERE member_id=? AND meeting_date=?", 
+              (member_id, meeting_date))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+# Add attendance
+def add_meeting_attendance(member_id, meeting_date, status="Present", notes=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO meeting_attendance (member_id, meeting_date, status, notes) VALUES (?, ?, ?, ?)",
+              (member_id, meeting_date, status, notes))
+    conn.commit()
+    conn.close()
