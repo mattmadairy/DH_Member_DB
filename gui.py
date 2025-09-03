@@ -15,6 +15,15 @@ DATE_FMT = "%m/%d/%Y"
 STATUS_OPTIONS = ["Attended", "Exemption Approved"]
 METHOD_OPTIONS = ["Cash", "Check", "Electronic"]
 
+    # Map report class names to MemberForm tabs
+REPORT_TAB_MAP = {
+    "DuesReport": "dues",
+    "Work_HoursReport": "work_hours",
+    "AttendanceReport": "attendance",
+    "WaiverReport": "membership",
+    "CommitteesReport": "membership",
+}
+
 # Add this utility function near the top of your code
 def center_window(window, width=None, height=None, parent=None):
     """Center a Tkinter window on the screen or relative to parent."""
@@ -262,8 +271,14 @@ class MemberApp:
                 self.recycle_bin_refresh_fn()
 
 
-    def _open_member_form(self, member_id=None):
-        return MemberForm(self.root, member_id, on_save_callback=lambda mid, mtype=None: self.load_data())
+    def _open_member_form(self, member_id, select_tab=None):
+        return MemberForm(
+            self.root,
+            member_id,
+            on_save_callback=lambda mid: self.load_data(),  # wrap in lambda
+            select_tab=select_tab
+        )
+
 
     # ---------- Right-click ----------
     def _show_row_menu(self, event):
@@ -476,6 +491,8 @@ class MemberApp:
         # ---------- Display in Preview ----------
         preview = tk.Toplevel(self.root)
         preview.title(f"Full Member Report - {member[3]} {member[4]} ({year})")
+        preview.transient()
+        preview.focus_set()
         center_window(preview, 850, 600, parent=self.root)
 
         text_widget = tk.Text(preview, wrap="none", font=("Courier New", 10))
@@ -640,11 +657,11 @@ class MemberApp:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(clipboard_text)
                 self.root.update()  # Force update
-                messagebox.showinfo(
-                    "Mail Merge Export",
-                    f"Exported {len(emails)} email addresses."
-                    #f"\nEmails have been copied to the clipboard."
-                )
+                #messagebox.showinfo(
+                #    "Mail Merge Export",
+                #    f"Exported {len(emails)} email addresses."
+                #    #f"\nEmails have been copied to the clipboard."
+                #)
 
             # Use `after` to ensure focus is back to main window
             self.root.after(100, copy_to_clipboard)
@@ -748,6 +765,9 @@ class MemberApp:
         # Preview window
         preview = tk.Toplevel(self.root)
         preview.title(f"Print Preview - {current_tab}")
+        preview.transient()
+        preview.focus_set()
+
         preview.update_idletasks()
 
         text_width = max(len(line) for line in preview_text.splitlines()) if preview_text else 85
@@ -919,9 +939,6 @@ class MemberApp:
         
         
     def _show_import_dialog(self):
-        from tkinter import filedialog
-        import csv
-
         file_path = filedialog.askopenfilename(
             title="Import Members",
             filetypes=[("CSV Files", "*.csv")]
@@ -990,7 +1007,10 @@ class NewMemberForm:
         self.top = tk.Toplevel(parent)
         self.top.title("Add New Member")
         center_window(self.top, 370, 575, parent)  # Center popup
+        self.top.transient()
+        self.top.focus_set()
         self.on_save_callback = on_save_callback
+        
 
         self.entries = {}
         self.waiver_var = tk.BooleanVar()
@@ -1087,8 +1107,12 @@ class RecycleBinWindow:
 
         self.top = tk.Toplevel(parent)
         self.top.title("Recycle Bin")
-        self.top.geometry("900x500")
+        
         center_window(self.top, 900, 500, parent)  # <-- Center popup relative to parent
+        self.top.transient()
+        self.top.focus_set()
+
+
 
         # ----- Top button frame -----
         btn_frame = ttk.Frame(self.top)
@@ -1209,8 +1233,9 @@ class SettingsWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Settings")
-        self.geometry("400x320")
         center_window(self, 400, 320, parent)
+        self.transient()
+        self.focus_set()
         self.resizable(False, False)
 
         # Load settings
@@ -1354,13 +1379,13 @@ class MemberForm(tk.Frame):
         super().__init__(parent)
         self.top = tk.Toplevel(parent)
         self.top.title("Member Form")
-
-        default_width = 850
-        default_height = 400
-        self.top.geometry(f"{default_width}x{default_height}")
+        center_window(self.top, 850, 400, parent)
+        self.top.transient(parent)
+        self.top.focus_set()
 
         self.member_id = member_id
         self.on_save_callback = on_save_callback
+        self.select_tab = select_tab 
 
         # ----- Notebook -----
         style = ttk.Style(self.top)
@@ -1701,6 +1726,8 @@ class MemberForm(tk.Frame):
                                  committees_vars=None, notes_var=None):
         popup = tk.Toplevel(self.top)
         popup.title(f"Edit {title}")
+        popup.transient(self.top)
+        popup.focus_set()
         editors = {}
 
         label_font = tkFont.Font(popup, family="TkDefaultFont", size=10, weight="bold")
@@ -1757,20 +1784,18 @@ class MemberForm(tk.Frame):
         center_window(popup, popup.winfo_reqwidth(), popup.winfo_reqheight(), self.top)
 
 
-    def _save_basic(self, editors, popup):
+    def _save_basic(self, editors, popup, notes_text=None):
         """Save Basic Info tab edits back to DB."""
         first_name = editors["First Name"].get().strip()
         last_name = editors["Last Name"].get().strip()
         dob = editors["Date of Birth"].get().strip()
 
-        # Update in DB
         database.update_member_basic(self.member_id, first_name, last_name, dob)
-
-        # Refresh UI
         self._load_member_data()
         popup.destroy()
 
-    def _save_contact(self, editors, popup):
+
+    def _save_contact(self, editors, popup, notes_text=None):
         """Save Contact Info tab edits back to DB."""
         email  = editors["Email Address"].get().strip()
         email2 = editors["Email Address 2"].get().strip()
@@ -1780,6 +1805,14 @@ class MemberForm(tk.Frame):
         city    = editors["City"].get().strip()
         state   = editors["State"].get().strip()
         zip_code= editors["Zip Code"].get().strip()
+
+        database.update_member_contact(
+            self.member_id, email, email2, phone, phone2,
+            address, city, state, zip_code
+        )
+        self._load_member_data()
+        popup.destroy()
+
 
 
         # Update in DB
@@ -1934,6 +1967,8 @@ class DuesTab(DataTab):
     def _open_edit_popup(self, title, labels, save_func, default_values):
         popup = tk.Toplevel(self.parent)
         popup.title(title)
+        popup.transient()
+        popup.focus_set()
 
         # Fonts
         popup_font = tkFont.Font(family="Helvetica", size=12, weight="bold")
@@ -2084,6 +2119,8 @@ class WorkHoursTab(DataTab):
     def _open_edit_popup(self, title, labels, save_function, default_values):
         popup = tk.Toplevel(self.parent)
         popup.title(title)
+        popup.transient()
+        popup.focus_set()
 
         # Define fonts
         popup_font = tkFont.Font(family="Helvetica", size=12, weight="bold")
@@ -2199,7 +2236,7 @@ class AttendanceTab(DataTab):
 
     def _update_attendance(self, attendance_id, *entries):
         date, status, notes = self._transform_entries(entries)
-        database.update_meeting_attendance(attendance_id, date=date, status=status, notes=notes)
+        database.update_meeting_attendance(attendance_id, meeting_date=date, status=status, notes=notes)
         self.load_records(self.member_id)
 
     def _add_buttons(self, parent):
@@ -2219,6 +2256,8 @@ class AttendanceTab(DataTab):
     def _open_edit_popup(self, title, labels, save_function, default_values):
         popup = tk.Toplevel(self.parent)
         popup.title(title)
+        popup.transient()
+        popup.focus_set()
 
         # Define a bigger, bold font
         popup_font = tkFont.Font(family="Helvetica", size=12, weight="bold")
@@ -2280,14 +2319,12 @@ class ReportsWindow(tk.Toplevel):
     def __init__(self, parent, member_id=None):
         super().__init__(parent)
         self.title("Reports")
-        self.geometry("900x600")
-        
         center_window(self, 900, 600, parent)
 
                 # Keep it on top of the main window
         self.transient(parent)   # Associate with main window
-        self.grab_set()          # Make it modal (prevents interacting with main window)
-        self.focus()             # Ensure it gets focus
+        #self.grab_set()          # Make it modal (prevents interacting with main window)
+        self.focus_set()             # Ensure it gets focus
 
         style = ttk.Style()
         #notebook = ttk.Notebook(self)
@@ -2505,8 +2542,11 @@ class BaseReport(tk.Frame):
 
 
         # --- Create print preview window ---
+        parent_window = self.winfo_toplevel()
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
+        print_window.transient(parent_window)
+        print_window.focus_set()
 
         frame = tk.Frame(print_window)
         frame.pack(fill="both", expand=True)
@@ -2551,6 +2591,32 @@ class BaseReport(tk.Frame):
         tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
 
 
+    def _on_row_double_click(self, event):
+        item_id = self.tree.identify_row(event.y)
+        if not item_id:
+            return
+        values = self.tree.item(item_id, "values")
+        if not values:
+            return
+
+        badge_or_member_id = values[0]  # assuming first column is badge/member_id
+        member_id = database.get_member_id_from_badge(badge_or_member_id)
+        if member_id is None:
+            return
+
+        # Determine which tab to open
+        tab_name = REPORT_TAB_MAP.get(self.__class__.__name__, "membership")
+
+        # Open MemberForm
+        try:
+            member_form = MemberForm(
+                self.winfo_toplevel(),
+                member_id=member_id,
+                select_tab=tab_name
+            )
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open member form: {e}")
 
 
     def populate_report(self):
@@ -2567,6 +2633,8 @@ class DuesReport(BaseReport):
         super().__init__(parent, member_id, include_month=False)
         self._create_tree()
         self.populate_report()
+        self.tree.bind("<Double-1>", self._on_row_double_click)
+
 
     def _create_tree(self):
         frame = tk.Frame(self)
@@ -2750,6 +2818,8 @@ class DuesReport(BaseReport):
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         center_window(print_window, width=800, height=600, parent=self.winfo_toplevel())
+        print_window.transient()
+        print_window.focus_set()
         frame = tk.Frame(print_window)
         frame.pack(fill="both", expand=True)
 
@@ -2799,6 +2869,8 @@ class Work_HoursReport(BaseReport):
         super().__init__(parent, member_id)
         self._create_tree()
         self.populate_report()
+        self.tree.bind("<Double-1>", self._on_row_double_click)
+
 
     def _create_tree(self):
         frame = tk.Frame(self)
@@ -2965,6 +3037,8 @@ class Work_HoursReport(BaseReport):
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        print_window.transient()
+        print_window.focus_set()
         frame = tk.Frame(print_window)
         frame.pack(fill="both", expand=True)
 
@@ -3007,7 +3081,6 @@ class Work_HoursReport(BaseReport):
 
 
 # ---------------- AttendanceReport ---------------- #
-
 class AttendanceReport(BaseReport):
     def __init__(self, parent, member_id=None):
         self.columns = ("badge", "name", "status")
@@ -3016,6 +3089,7 @@ class AttendanceReport(BaseReport):
         super().__init__(parent, member_id)
         self._create_tree()
         self.populate_report()
+        self.tree.bind("<Double-1>", self._on_row_double_click)
 
     def _create_tree(self):
         frame = tk.Frame(self)
@@ -3204,6 +3278,8 @@ class AttendanceReport(BaseReport):
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        print_window.transient()
+        print_window.focus_set()
         frame = tk.Frame(print_window)
         frame.pack(fill="both", expand=True)
 
@@ -3252,6 +3328,8 @@ class WaiverReport(BaseReport):
         super().__init__(parent, member_id, include_month=False)
         self._create_tree()
         self.populate_report()
+        self.tree.bind("<Double-1>", self._on_row_double_click)
+
 
     def _create_tree(self):
         frame = tk.Frame(self)
@@ -3414,6 +3492,8 @@ class WaiverReport(BaseReport):
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        print_window.transient()
+        print_window.focus_set()
         frame = tk.Frame(print_window)
         frame.pack(fill="both", expand=True)
 
@@ -3464,7 +3544,7 @@ class CommitteesReport(BaseReport):
         self._setup_committee_filter()
         self._create_tree()
         self.populate_report()
-
+        
     def _setup_committee_filter(self):
         bold_font = tkFont.Font(family="Arial", size=10, weight="bold")
         tk.Label(self, text="Committee:", font=bold_font).pack(anchor="w", padx=10, pady=(5, 2))
@@ -3505,6 +3585,7 @@ class CommitteesReport(BaseReport):
         hsb.grid(row=1, column=0, sticky="ew")
         self.tree_frame.grid_rowconfigure(0, weight=1)
         self.tree_frame.grid_columnconfigure(0, weight=1)
+        self.tree.bind("<Double-1>", self._on_row_double_click)
 
         for col, width in zip(self.columns, self.column_widths):
             header_text = "Badge" if col == "badge_number" else col.replace("_", " ").title()
@@ -3665,6 +3746,8 @@ class CommitteesReport(BaseReport):
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
         center_window(print_window, width=725, height=600, parent=self.winfo_toplevel())
+        print_window.transient()
+        print_window.focus_set()
         frame = tk.Frame(print_window)
         frame.pack(fill="both", expand=True)
 

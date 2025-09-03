@@ -1340,3 +1340,15 @@ def get_executive_committee_members():
         })
 
     return exec_members
+
+
+def get_member_id_from_badge(badge):
+    """Return member_id corresponding to the badge number."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM members WHERE badge_number = ?", (badge,))
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        return row[0]
+    return None
