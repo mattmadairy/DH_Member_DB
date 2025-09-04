@@ -7,8 +7,9 @@ from datetime import datetime
 import csv
 import calendar
 #import pyperclip
-#from reportlab.lib.pagesizes import letter
-#from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from PIL import Image, ImageTk
 
 
 DATE_FMT = "%m/%d/%Y"
@@ -63,29 +64,43 @@ class MemberApp:
         "Card/Fob Internal Number", "Card/Fob External Number"
     )
 
+
     def __init__(self, root):
         self.root = root
         self.root.title("Dug Hill Rod & Gun Club Membership Database")
+
+        # ---- Window geometry ----
         window_width = 1100
         window_height = 600
-
-        # Get screen dimensions
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
-
-        # Calculate x and y coordinates to center the window
         x = (screen_width // 2) - (window_width // 2)
         y = (screen_height // 2) - (window_height // 2)
-
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        center_window(self.root, 1100, 600)  # <-- Center main window
-        
-        
+        center_window(self.root, 1100, 600)
+
+        # ---- Base directory ----
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
+
+      
+
+        # ---- Window icon for titlebar (all platforms) ----
+        png_icon_path = os.path.join(self.base_dir, "Club_logo_smaller-removebg-preview.png")
+        if os.path.exists(png_icon_path):
+            try:
+                img = Image.open(png_icon_path)
+                img = img.resize((32, 32), Image.Resampling.LANCZOS)
+                self.tk_icon = ImageTk.PhotoImage(img)
+                self.root.iconphoto(True, self.tk_icon)  # Sets window icon (not taskbar)
+            except Exception as e:
+                print(f"Failed to set window icon: {e}")
+
+
         self.recycle_bin_refresh_fn = None
         self.member_types = ["All", "Probationary", "Associate", "Active", "Life",
                              "Prospective", "Wait List", "Former"]
         self.trees = {}
+
 
         # ----- Menubar -----
         menubar = tk.Menu(self.root)
@@ -172,22 +187,58 @@ class MemberApp:
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
-        tree = ttk.Treeview(container, columns=columns, show="headings", selectmode="extended")
-        self._sort_column_states = {}  # Keep track of sort order per column
+        # Canvas for watermark
+        canvas = tk.Canvas(container, bg="white")
+        canvas.grid(row=0, column=0, sticky="nsew")
 
+        # Load and resize logo
+        logo_path = os.path.join(self.base_dir, "Club_logo_smaller-removebg-preview.png")  # adjust path/extension
+        logo_image = Image.open(logo_path)
+
+        # Pillow 10+ safe resampling
+        try:
+            resample = Image.Resampling.LANCZOS
+        except AttributeError:
+            resample = Image.ANTIALIAS
+
+        logo_image = logo_image.resize((300, 300), resample)
+        self.logo_tk = ImageTk.PhotoImage(logo_image)
+
+        # Draw logo centered
+        canvas.create_image(0, 0, image=self.logo_tk, anchor="nw", tags="logo")
+
+        # Treeview on top of canvas
+        tree = ttk.Treeview(container, columns=columns, show="headings", selectmode="extended")
+        tree.place(relx=0, rely=0, relwidth=1, relheight=1)  # overlay full container
+
+        # Setup columns and headings
+        self._sort_column_states = {}
         for col in columns:
             tree.heading(col, text=col, command=lambda c=col, t=tree: self._sort_tree_column(t, c, False))
             tree.column(col, width=120, anchor="w")
             if col == "Badge":
                 tree.column(col, width=90, anchor="center")
 
+        # Scrollbars
         yscroll = ttk.Scrollbar(container, orient="vertical", command=tree.yview)
         yscroll.grid(row=0, column=1, sticky="ns")
         xscroll = ttk.Scrollbar(parent, orient="horizontal", command=tree.xview)
         xscroll.pack(side="bottom", fill="x")
         tree.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-        tree.grid(row=0, column=0, sticky="nsew")
+
+        # Keep logo centered on resize
+        def resize_watermark(event):
+            canvas.coords(
+                "logo",
+                (canvas.winfo_width() // 2 - logo_image.width // 2,
+                canvas.winfo_height() // 2 - logo_image.height // 2)
+            )
+
+        container.bind("<Configure>", resize_watermark)
+
         return tree
+
+
 
     def _sort_tree_column(self, tree, col, reverse):
         """Sort tree contents by column and update header arrows."""
@@ -2377,26 +2428,23 @@ class ReportsWindow(tk.Toplevel):
     
 # ---------------- BaseReport ---------------- #
 class BaseReport(tk.Frame):
-    """Base class for all reports. Subclasses must define columns and _create_tree()."""
     def __init__(self, parent, member_id=None, include_month=True):
         super().__init__(parent)
         self.member_id = member_id
         self.include_month = include_month
         self.tree = None
 
-        # --- get default year from settings table ---
         try:
             default_year = database.get_setting("default_year")
             if default_year is None:
-                default_year = datetime.now().year  # fallback
+                default_year = datetime.now().year
         except Exception:
-            default_year = datetime.now().year      # fallback if query fails
+            default_year = datetime.now().year
 
         self.year_var = tk.IntVar(value=int(default_year))
         self.month_var = tk.StringVar(value="All")
         self.exclude_names_var = tk.BooleanVar(value=False)
 
-        # Setup shared controls
         self._setup_controls()
 
     def _setup_controls(self):
@@ -2421,6 +2469,17 @@ class BaseReport(tk.Frame):
         cb = ttk.Checkbutton(frame, text="Exclude Names From Print", variable=self.exclude_names_var)
         cb.pack(side="left", padx=10)
 
+    def _get_default_filename(self, ext=".pdf"):
+        report_name = self.__class__.__name__.replace("Report", " Report")
+        year = self.year_var.get()
+        month = self.month_var.get()
+        if month == "All" or not self.include_month:
+            filename = f"{report_name} {year}{ext}"
+        else:
+            filename = f"{report_name} {year} {month}{ext}"
+        filename = "".join(c for c in filename if c not in r'\/:*?"<>|')
+        return filename
+
     def export_csv(self):
         if self.tree is None:
             return
@@ -2428,7 +2487,12 @@ class BaseReport(tk.Frame):
         if not items:
             messagebox.showwarning("Export CSV", "No data to export.")
             return
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files","*.csv")])
+        default_name = self._get_default_filename(".csv")
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV Files","*.csv")],
+            initialfile=default_name
+        )
         if not path:
             return
         try:
@@ -2441,9 +2505,7 @@ class BaseReport(tk.Frame):
         except Exception as e:
             messagebox.showerror("Export CSV", f"Failed to export CSV: {e}")
 
-
     def print_report(self):
-        """Generic print preview with scrollbars and action buttons."""
         if self.tree is None:
             return
         items = self.tree.get_children()
@@ -2451,10 +2513,8 @@ class BaseReport(tk.Frame):
             messagebox.showinfo("Print Report", "No data to print.")
             return
 
-        org_name = "Dug Hill Rod & Gun Club"
         report_name = self.__class__.__name__.replace("Report", " Report")
         generation_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-
         headers = [c.replace("_", " ").title() for c in self.columns]
 
         col_widths = [len(h) for h in headers]
@@ -2480,7 +2540,7 @@ class BaseReport(tk.Frame):
 
         def add_header():
             total_width = sum(col_widths) + (len(col_widths) - 1)
-            current_lines.append(org_name.center(total_width))
+            current_lines.append("Dug Hill Rod & Gun Club".center(total_width))
             current_lines.append(report_name.center(total_width))
             current_lines.append("=" * total_width)
             current_lines.append(format_row(headers))
@@ -2511,41 +2571,30 @@ class BaseReport(tk.Frame):
             page_lines.append("End of Report".center(footer_width))
 
         full_text = "\n\n".join("\n".join(p) for p in pages)
-        
+
         def generate_pdf(path, full_text):
             from reportlab.lib.pagesizes import letter
             from reportlab.pdfgen import canvas
 
             c = canvas.Canvas(path, pagesize=letter)
-            c.setFont("Courier", 10)  # monospaced built-in font
-
+            c.setFont("Courier", 10)
             width, height = letter
             margin = 50
             usable_width = width - (2 * margin)
-
-            # Courier 10pt is ~6 chars per mm, ~10 chars per 72pt inch
             char_width = c.stringWidth("M", "Courier", 10)
             max_chars = int(usable_width // char_width)
-
             y = height - margin
             line_height = 12
-
             for line in full_text.split("\n"):
-                # Ensure line fills the page width (like preview)
                 padded = line.ljust(max_chars)
                 c.drawString(margin, y, padded)
-
                 y -= line_height
-                if y < margin:  # new page when reaching bottom
+                if y < margin:
                     c.showPage()
                     c.setFont("Courier", 10)
                     y = height - margin
-
             c.save()
 
-
-
-        # --- Create print preview window ---
         parent_window = self.winfo_toplevel()
         print_window = tk.Toplevel(self)
         print_window.title(f"{report_name} - Print Preview")
@@ -2564,18 +2613,21 @@ class BaseReport(tk.Frame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
         hsb.grid(row=1, column=0, sticky="ew")
-
         text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        # --- Button panel ---
         btn_frame = tk.Frame(print_window)
         btn_frame.pack(fill="x", pady=5)
 
         def save_as_pdf():
-            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])
+            default_name = self._get_default_filename(".pdf")
+            path = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF Files","*.pdf")],
+                initialfile=default_name
+            )
             if not path:
                 return
             generate_pdf(path, full_text)
@@ -2584,16 +2636,12 @@ class BaseReport(tk.Frame):
         def print_to_pdf():
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
             generate_pdf(tmp.name, full_text)
-            webbrowser.open_new(tmp.name)  # lets user print from system PDF viewer
-
-        def export_csv():
-            self.export_csv()
+            webbrowser.open_new(tmp.name)
 
         tk.Button(btn_frame, text="Print", command=print_to_pdf).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Save as PDF", command=save_as_pdf).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Export CSV", command=export_csv).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export CSV", command=self.export_csv).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Cancel", command=print_window.destroy).pack(side="right", padx=5)
-
 
     def _on_row_double_click(self, event):
         item_id = self.tree.identify_row(event.y)
@@ -2603,28 +2651,22 @@ class BaseReport(tk.Frame):
         if not values:
             return
 
-        badge_or_member_id = values[0]  # assuming first column is badge/member_id
+        badge_or_member_id = values[0]
         member_id = database.get_member_id_from_badge(badge_or_member_id)
         if member_id is None:
             return
 
-        # Determine which tab to open
         tab_name = REPORT_TAB_MAP.get(self.__class__.__name__, "membership")
-
-        # Open MemberForm
         try:
             member_form = MemberForm(
                 self.winfo_toplevel(),
                 member_id=member_id,
                 select_tab=tab_name
             )
-
         except Exception as e:
             messagebox.showerror("Error", f"Could not open member form: {e}")
 
-
     def populate_report(self):
-        """Must be implemented in each subclass."""
         raise NotImplementedError
 
 
@@ -2844,6 +2886,26 @@ class DuesReport(BaseReport):
         # --- Buttons ---
         btn_frame = tk.Frame(print_window)
         btn_frame.pack(fill="x", pady=5)
+
+        def generate_pdf(path, full_text):
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Courier", 10)
+            width, height = letter
+            margin = 50
+            usable_width = width - 2 * margin
+            char_width = c.stringWidth("M", "Courier", 10)
+            max_chars = int(usable_width // char_width)
+            y = height - margin
+            line_height = 12
+            for line in full_text.split("\n"):
+                padded = line.ljust(max_chars)
+                c.drawString(margin, y, padded)
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Courier", 10)
+                    y = height - margin
+            c.save()
 
         def save_as_pdf():
             path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files","*.pdf")])

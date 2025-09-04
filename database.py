@@ -662,32 +662,6 @@ def add_meeting_attendance(member_id, meeting_date, status, notes=None):
     conn.commit()
     conn.close()
 
-def get_meeting_attendance(member_id, year=None):
-    """
-    Fetch meeting attendance for a specific member.
-    If year is provided, only return attendance records for that year.
-    """
-    
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        if year:
-            cur.execute("""
-                SELECT * FROM meeting_attendance
-                WHERE member_id = ? AND strftime('%Y', meeting_date) = ?
-                ORDER BY meeting_date ASC
-            """, (member_id, str(year)))
-        else:
-            cur.execute("""
-                SELECT * FROM meeting_attendance
-                WHERE member_id = ?
-                ORDER BY meeting_date ASC
-            """, (member_id,))
-        
-        results = cur.fetchall()
-        return results
-    finally:
-        conn.close()
 
 def get_attendance_summary(year=None, month=None):
     import sqlite3
@@ -1363,15 +1337,44 @@ def get_member_by_card_internal(card_internal):
     conn.close()
     return row
 
-# Get attendance for a member on a given date
-def get_meeting_attendance(member_id, meeting_date):
+def get_meeting_attendance(member_id, year=None, meeting_date=None):
+    """
+    Fetch meeting attendance for a specific member.
+
+    - If meeting_date is provided, returns the record for that date.
+    - If year is provided, returns all records for that year.
+    - Otherwise, returns all records for the member.
+    """
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM meeting_attendance WHERE member_id=? AND meeting_date=?", 
-              (member_id, meeting_date))
-    row = c.fetchone()
-    conn.close()
-    return row
+    try:
+        cur = conn.cursor()
+
+        if meeting_date:
+            cur.execute("""
+                SELECT * FROM meeting_attendance
+                WHERE member_id = ? AND meeting_date = ?
+                ORDER BY meeting_date ASC
+            """, (member_id, meeting_date))
+            return cur.fetchone()
+
+        elif year:
+            cur.execute("""
+                SELECT * FROM meeting_attendance
+                WHERE member_id = ? AND strftime('%Y', meeting_date) = ?
+                ORDER BY meeting_date ASC
+            """, (member_id, str(year)))
+            return cur.fetchall()
+
+        else:
+            cur.execute("""
+                SELECT * FROM meeting_attendance
+                WHERE member_id = ?
+                ORDER BY meeting_date ASC
+            """, (member_id,))
+            return cur.fetchall()
+
+    finally:
+        conn.close()
 
 # Add attendance
 def add_meeting_attendance(member_id, meeting_date, status="Present", notes=None):
