@@ -1,6 +1,8 @@
 
 shrink dues report to fit on one page width
 
+Member Title, suffix, nickname, middle name?
+
 
 import csv for meeting attendance captured from RFID scanner.
  
