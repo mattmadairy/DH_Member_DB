@@ -1846,16 +1846,22 @@ class MemberForm(tk.Frame):
         dob = editors["Date of Birth"].get().strip()
 
         database.update_member_basic(self.member_id, first_name, last_name, dob)
-        self._load_member_data()
-        popup.destroy()
 
+        # Refresh UI
+        self._load_member_data()
+
+        # 🔄 notify parent tree
+        if self.on_save_callback:
+            self.on_save_callback(self.member_id)
+
+        popup.destroy()
 
     def _save_contact(self, editors, popup, notes_text=None):
         """Save Contact Info tab edits back to DB."""
-        email  = editors["Email Address"].get().strip()
-        email2 = editors["Email Address 2"].get().strip()
-        phone  = editors["Phone Number"].get().strip()
-        phone2 = editors["Phone Number 2"].get().strip()
+        email   = editors["Email Address"].get().strip()
+        email2  = editors["Email Address 2"].get().strip()
+        phone   = editors["Phone Number"].get().strip()
+        phone2  = editors["Phone Number 2"].get().strip()
         address = editors["Address"].get().strip()
         city    = editors["City"].get().strip()
         state   = editors["State"].get().strip()
@@ -1865,24 +1871,16 @@ class MemberForm(tk.Frame):
             self.member_id, email, email2, phone, phone2,
             address, city, state, zip_code
         )
-        self._load_member_data()
-        popup.destroy()
-
-
-
-        # Update in DB
-        database.update_member_contact(
-            self.member_id, email, email2, phone, phone2,
-            address, city, state, zip_code
-        )
 
         # Refresh UI
         self._load_member_data()
+
+        # 🔄 notify parent tree
+        if self.on_save_callback:
+            self.on_save_callback(self.member_id)
+
         popup.destroy()
 
-
-
-    # ----- Save membership edit -----
     def _save_membership_edit(self, editors, committees_vars, notes_text, popup):
         # ----- Membership info -----
         waiver_str = self.waiver_var.get() if self.waiver_var.get() in ("Yes", "No") else "No"
@@ -1900,21 +1898,24 @@ class MemberForm(tk.Frame):
 
         # ----- Role/Term -----
         term_start = editors["Term Start"].get().strip()
-        term_end = editors["Term End"].get().strip()
+        term_end   = editors["Term End"].get().strip()
         database.update_member_role(self.member_id, self.role_var.get(), term_start, term_end)
 
         # ----- Committees + Notes -----
         committees_data = {k: int(v.get()) for k, v in committees_vars.items()}
         if notes_text is not None:
             committees_data["notes"] = notes_text.get("1.0", "end-1c").strip()
-
         database.update_member_committees(self.member_id, committees_data)
 
-        # ----- Refresh UI -----
+        # Refresh UI
         self._load_member_data()
+
+        # 🔄 notify parent tree
         if self.on_save_callback:
             self.on_save_callback(self.member_id)
+
         popup.destroy()
+
 
 
 class DuesTab(DataTab):
