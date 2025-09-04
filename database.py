@@ -437,12 +437,24 @@ def restore_member_by_id(member_id):
     conn.close()
 
 def get_member_by_id(member_id):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM members WHERE id=?", (member_id,))
-    row = c.fetchone()
+    conn = sqlite3.connect("members.db")
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, badge_number, membership_type, first_name, last_name, dob,
+            email, phone, address, city, state, zip, join_date, email2,
+            sponsor, card_internal, card_external, deleted, phone2, waiver,
+            middle_name, nickname, suffix
+        FROM members
+        WHERE id = ?
+    """, (member_id,))
+
+
+    row = cur.fetchone()
     conn.close()
     return row
+
 
 def get_member_by_badge(badge):
     conn = get_connection()
@@ -1178,16 +1190,25 @@ def get_member_committees(member_id):
         # Return empty dict with all columns if member has no record
         return {col: "" for col in committee_columns}
 
-def update_member_basic(member_id, first_name, last_name, dob):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
+def update_member_basic(member_id, first_name, middle_name, last_name, suffix, nickname, dob):
+    conn = sqlite3.connect("members.db")
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute("""
         UPDATE members
-        SET first_name = ?, last_name = ?, dob = ?
+        SET first_name   = ?,
+            middle_name  = ?,
+            last_name    = ?,
+            suffix       = ?,
+            nickname     = ?,
+            dob          = ?
         WHERE id = ?
-    """, (first_name, last_name, dob, member_id))
+    """, (first_name, middle_name, last_name, suffix, nickname, dob, member_id))
+
     conn.commit()
     conn.close()
+
 
 def update_member_contact(member_id, email, email2, phone, phone2, address, city, state, zip):
     conn = get_connection()

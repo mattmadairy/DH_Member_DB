@@ -423,7 +423,15 @@ class MemberApp:
 
 
         # Row 1: Personal | Membership
-        left_fields = [("First Name", member[3]), ("Last Name", member[4]), ("DOB", member[5])]
+        left_fields = [
+        ("First Name", member[3]),
+        ("Middle Name", member[20]),
+        ("Last Name", member[4]),
+        ("Suffix", member[22]),
+        ("DOB", member[5]),
+        ("Nickname", member[21])
+    ]
+
         right_fields = [("Badge", member[1]), ("Type", member[2]), ("Join Date", member[12]),
                         ("Sponsor", member[14]), ("Waiver", member[19])]
         report_text += "Personal".ljust(left_width) + "Membership\n"
@@ -596,11 +604,18 @@ class MemberApp:
             if path:
                 with open(path, "w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
-                    # Write top blocks
+                    
+                    # Write top blocks (Personal + Membership)
                     for section, fields in [("Personal", left_fields), ("Membership", right_fields)]:
-                        for field, value in fields:
+                        for field_tuple in fields:
+                            # Safely unpack first two elements, ignore extra
+                            if len(field_tuple) >= 2:
+                                field, value = field_tuple[:2]
+                            else:
+                                field, value = field_tuple[0], ""
                             writer.writerow([section, field, value])
                     writer.writerow([])
+
                     # Dues
                     writer.writerow(["Dues History"])
                     if dues:
@@ -610,23 +625,26 @@ class MemberApp:
                     else:
                         writer.writerow(["No dues recorded"])
                     writer.writerow([])
+
                     # Work hours
                     writer.writerow(["Work Hours"])
                     if work_hours:
-                        writer.writerow(["Date","Hours","Activity","Notes"])
+                        writer.writerow(["Date", "Hours", "Activity", "Notes"])
                         for w in work_hours:
                             writer.writerow([w[2], w[4], w[3], w[5]])
                     else:
                         writer.writerow(["No work hours recorded"])
                     writer.writerow([])
+
                     # Attendance
                     writer.writerow(["Meeting Attendance"])
                     if attendance:
-                        writer.writerow(["Date","Status","Notes"])
+                        writer.writerow(["Date", "Status", "Notes"])
                         for a in attendance:
                             writer.writerow([a[2], a[3], a[4]])
                     else:
                         writer.writerow(["No attendance recorded"])
+
 
         def print_report():
             try:
@@ -1498,6 +1516,10 @@ class MemberForm(tk.Frame):
         self.term_var = tk.StringVar()
         self.committees_var = tk.StringVar()  # read-only display in membership tab
         self.notes_var = tk.StringVar()  # for read-only display in membership tab
+        self.middle_name_var = tk.StringVar()
+        self.nickname_var = tk.StringVar()
+        self.suffix_var = tk.StringVar()
+
 
 
         self.membership_types = ["Probationary", "Associate", "Active", "Life", "Prospective", "Wait List", "Former"]
@@ -1506,7 +1528,10 @@ class MemberForm(tk.Frame):
         # ----- Build read-only tabs -----
         self._build_read_only_tab(self.tab_basic, [
             ("First Name", self.first_name_var),
+            ("Middle Name", self.middle_name_var),
             ("Last Name", self.last_name_var),
+            ("Suffix", self.suffix_var),
+            ("Nickname", self.nickname_var),
             ("Date of Birth", self.dob_var)
         ], self._edit_basic, "basic")
 
@@ -1626,7 +1651,10 @@ class MemberForm(tk.Frame):
             ("badge_number_var", "badge_number", ""),
             ("membership_type_var", "membership_type", ""),
             ("first_name_var", "first_name", ""),
+            ("middle_name_var", "middle_name", ""),   # 👈 new
             ("last_name_var", "last_name", ""),
+            ("suffix_var", "suffix", ""),             # 👈 new
+            ("nickname_var", "nickname", ""),         # 👈 new
             ("dob_var", "dob", ""),
             ("email_var", "email", ""),
             ("email2_var", "email2", ""),
@@ -1699,9 +1727,13 @@ class MemberForm(tk.Frame):
     def _edit_basic(self):
         self._open_edit_popup_generic("Basic Info", [
             ("First Name", self.first_name_var),
+            ("Middle Name", self.middle_name_var),   # 👈 new
             ("Last Name", self.last_name_var),
+            ("Suffix", self.suffix_var),             # 👈 new
+            ("Nickname", self.nickname_var),         # 👈 new
             ("Date of Birth", self.dob_var)
         ], self._save_basic)
+
 
 
     def _get_term_start(self):
@@ -1841,11 +1873,22 @@ class MemberForm(tk.Frame):
 
     def _save_basic(self, editors, popup, notes_text=None):
         """Save Basic Info tab edits back to DB."""
-        first_name = editors["First Name"].get().strip()
-        last_name = editors["Last Name"].get().strip()
-        dob = editors["Date of Birth"].get().strip()
+        first_name   = editors["First Name"].get().strip()
+        middle_name  = editors["Middle Name"].get().strip()
+        last_name    = editors["Last Name"].get().strip()
+        suffix       = editors["Suffix"].get().strip()
+        nickname     = editors["Nickname"].get().strip()
+        dob          = editors["Date of Birth"].get().strip()
 
-        database.update_member_basic(self.member_id, first_name, last_name, dob)
+        database.update_member_basic(
+            self.member_id,
+            first_name,
+            middle_name,
+            last_name,
+            suffix,
+            nickname,
+            dob
+        )
 
         # Refresh UI
         self._load_member_data()
@@ -1855,6 +1898,7 @@ class MemberForm(tk.Frame):
             self.on_save_callback(self.member_id)
 
         popup.destroy()
+
 
     def _save_contact(self, editors, popup, notes_text=None):
         """Save Contact Info tab edits back to DB."""

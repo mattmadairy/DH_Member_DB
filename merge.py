@@ -1,10 +1,10 @@
-from PIL import Image
+import sqlite3
 
-# Load your PNG
-img = Image.open("Club_logo_smaller-removebg-preview.png")
+conn = sqlite3.connect("members.db")
+cur = conn.cursor()
 
-# Define sizes Windows uses for taskbar / titlebar
-sizes = [(16, 16), (32, 32), (48, 48), (256, 256)]
+cur.execute("PRAGMA table_info(members)")
+for col in cur.fetchall():
+    print(col)
 
-# Save multi-size ICO
-img.save("Club_logo.ico", sizes=sizes)
+conn.close()
